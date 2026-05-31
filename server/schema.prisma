@@ -1,0 +1,102 @@
+// Prisma schema for a simple Note model
+// Uses SQLite for local development
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Jury {
+  id       Int       @id @default(autoincrement())
+  name     String
+  teachers Teacher[] @relation("JuryTeachers")
+  students Student[] @relation("JuryStudents")
+
+  @@map("jury")
+}
+
+model Teacher {
+  id       Int     @id @default(autoincrement())
+  email    String  @unique
+  password String
+  jury     String?
+  juryId   Int?
+  juryRef  Jury?   @relation("JuryTeachers", fields: [juryId], references: [id])
+  admin    Boolean @default(false)
+}
+
+model Student {
+  id           Int     @id @default(autoincrement())
+  email        String  @unique
+  password     String
+  nom          String?
+  prenom       String?
+  assignedJury String?
+  juryId       Int?
+  juryRef      Jury?   @relation("JuryStudents", fields: [juryId], references: [id])
+  submissions  Submission[]
+  isTest       Boolean @default(false)
+}
+
+model Questionnaire {
+  id              Int                @id @default(autoincrement())
+  title           String
+  openForStudents Boolean            @default(false)
+  gradingMode     String             @default("points")
+  maxScore        Float              @default(20)
+  audience        String             @default("teachers")
+  showResults     Boolean            @default(false)
+  shuffleQuestions Boolean           @default(false)
+  categories      QuestionCategory[]
+  submissions     Submission[]
+}
+
+model QuestionCategory {
+  id              Int           @id @default(autoincrement())
+  title           String?
+  questions       Question[]
+  questionnaire   Questionnaire @relation(fields: [questionnaireId], references: [id])
+  questionnaireId Int
+  currentNote     Float
+}
+
+model Question {
+  id                 Int              @id @default(autoincrement())
+  title              String
+  questionCategoryId Int
+  questionnaire      QuestionCategory @relation(fields: [questionCategoryId], references: [id])
+
+  elements QuestionElement[]
+}
+
+model QuestionElement {
+  id    Int    @id @default(autoincrement())
+  type  String // radio, checkbox, text, etc.
+  title String
+
+  questionId Int
+  question   Question @relation(fields: [questionId], references: [id])
+
+  priority        Int
+  evaluatingType  Int // reduce, increase, multiply, set max points
+  evaluatingValue Float
+}
+
+model Submission {
+  id              Int       @id @default(autoincrement())
+  questionnaireId Int
+  questionnaire   Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  
+  studentId Int?
+  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
+  
+  answers   String? // JSON array of { questionId, answer }
+  submittedAt DateTime @default(now())
+  
+  @@index([questionnaireId])
+  @@index([studentId])
+}
