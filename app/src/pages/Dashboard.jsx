@@ -304,6 +304,8 @@ export default function Dashboard() {
                             <Button size="small" variant="text" onClick={() => navigate(`/questionnaire/${q.id}`)} sx={{ textTransform: 'none' }}>Ouvrir (Enseignant)</Button>
                             {isAdmin && (
                               <>
+                              
+                                <Button size="small" variant="text" onClick={() => navigate(`/admin/questionnaire/${q.id}/results`)} sx={{ textTransform: 'none' }}>Voir résultats</Button>
                                 <IconButton
                                   size="small"
                                   onClick={(e) => {
@@ -314,7 +316,6 @@ export default function Dashboard() {
                                 >
                                   <DownloadIcon fontSize="small" />
                                 </IconButton>
-                                <Button size="small" variant="text" onClick={() => navigate(`/admin/questionnaire/${q.id}/results`)} sx={{ textTransform: 'none' }}>Voir résultats</Button>
                                 <IconButton
                                   size="small"
                                   onClick={(e) => {
