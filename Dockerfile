@@ -1,30 +1,13 @@
 FROM node:20-alpine
 
-# Dépendances utiles pour Prisma / Node
-RUN apk add --no-cache bash openssl
-
 WORKDIR /app
 
-# Copier les dépendances
 COPY package*.json ./
-
-# Installer
 RUN npm install
 
-# Copier le projet
+# Copy application sources (index.html, app/, public/, vite config, etc.)
 COPY . .
 
-# Générer Prisma Client
-RUN npx prisma generate
+EXPOSE 5173
 
-# Build (React/Vite ou app Node compilée)
-RUN npm run build
-
-# Production
-ENV NODE_ENV=production
-
-# Port
-EXPOSE 3000
-
-# Lancer l'application
-CMD ["npm", "start"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]

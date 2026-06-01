@@ -8,6 +8,10 @@ export function getQuestionnaire(id) {
   return apiJson(`/api/questionnaires/${id}`)
 }
 
+export function getQuestionnaireJury(id) {
+  return apiJson(`/api/questionnaires/${id}/jury`)
+}
+
 export function createQuestionnaire({ title }) {
   return apiJson('/api/questionnaires', {
     method: 'POST',
@@ -23,6 +27,20 @@ export function updateQuestionnaire(id, patch) {
   return apiJson(`/api/questionnaires/${id}`, {
     method: 'PUT',
     json: patch,
+  })
+}
+
+export function updateQuestionnaireJury(id, { teacherIds, studentIds }) {
+  return apiJson(`/api/questionnaires/${id}/jury`, {
+    method: 'PUT',
+    json: { teacherIds, studentIds },
+  })
+}
+
+export function importQuestionnaire(payload) {
+  return apiJson('/api/questionnaires/import', {
+    method: 'POST',
+    json: payload,
   })
 }
 

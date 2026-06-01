@@ -1,30 +1,47 @@
 services:
-  app:
-    container_name: ${NAME}
+  backend:
+    container_name: ${NAME}-api
     build:
-      context: .
+      context: ./app/server
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: file:/app/prisma/dev.db
-    volumes:
-      - ./prisma:/app/prisma
+      DATABASE_URL: file:/app/dev.db
+    ports:
+      - "4000:4000"
     networks:
       - lan
       - web
     labels:
       - traefik.enable=true
-      - traefik.http.routers.${NAME}.entrypoints=websecure
+      - traefik.http.routers.${NAME}-api.rule=Host(`api.${NAME}.jrcan.dev`)
+      - traefik.http.routers.${NAME}-api.entrypoints=websecure
+      - traefik.http.routers.${NAME}-api.tls=true
+      - traefik.http.services.${NAME}-api.loadbalancer.server.port=4000
+
+  frontend:
+    container_name: ${NAME}
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "5173:5173"
+    networks:
+      - web
+    labels:
+      - traefik.enable=true
       - traefik.http.routers.${NAME}.rule=Host(`${NAME}.jrcan.dev`)
+      - traefik.http.routers.${NAME}.entrypoints=websecure
       - traefik.http.routers.${NAME}.tls=true
-      - traefik.http.routers.${NAME}.tls.certresolver=myresolver
-      - traefik.http.services.${NAME}.loadbalancer.server.port=3000
+      - traefik.http.services.${NAME}.loadbalancer.server.port=5173
 
 networks:
   web:
     external: true
 
   lan:
-    external: false
     name: lan_${NAME}

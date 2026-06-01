@@ -27,6 +27,8 @@ model Teacher {
   juryId   Int?
   juryRef  Jury?   @relation("JuryTeachers", fields: [juryId], references: [id])
   admin    Boolean @default(false)
+
+  questionnaireJuries QuestionnaireJuryMember[]
 }
 
 model Student {
@@ -40,19 +42,44 @@ model Student {
   juryRef      Jury?   @relation("JuryStudents", fields: [juryId], references: [id])
   submissions  Submission[]
   isTest       Boolean @default(false)
+
+  questionnaireStudents QuestionnaireStudentMember[]
 }
 
 model Questionnaire {
-  id              Int                @id @default(autoincrement())
-  title           String
-  openForStudents Boolean            @default(false)
-  gradingMode     String             @default("points")
-  maxScore        Float              @default(20)
-  audience        String             @default("teachers")
-  showResults     Boolean            @default(false)
-  shuffleQuestions Boolean           @default(false)
-  categories      QuestionCategory[]
-  submissions     Submission[]
+  id               Int                @id @default(autoincrement())
+  title            String
+  openForStudents  Boolean            @default(false)
+  gradingMode      String             @default("points")
+  maxScore         Float              @default(20)
+  audience         String             @default("teachers")
+  showResults      Boolean            @default(false)
+  shuffleQuestions Boolean            @default(false)
+  categories       QuestionCategory[]
+  submissions      Submission[]
+
+  juryMembers QuestionnaireJuryMember[]
+  students    QuestionnaireStudentMember[]
+}
+
+model QuestionnaireJuryMember {
+  questionnaireId Int
+  teacherId       Int
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  teacher       Teacher       @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+
+  @@id([questionnaireId, teacherId])
+}
+
+model QuestionnaireStudentMember {
+  questionnaireId Int
+  studentId       Int
+
+  questionnaire Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([questionnaireId, studentId])
 }
 
 model QuestionCategory {

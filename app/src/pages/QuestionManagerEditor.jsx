@@ -32,10 +32,11 @@ import CoPresentIcon from '@mui/icons-material/CoPresent'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopAppBar from '../components/TopAppBar.jsx'
 import QuestionComponent from '../components/QuestionComponent.jsx'
-import { getQuestionnaire, updateQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi, addCategory as addCategoryApi } from '../api/questionnaires.js'
+import { getQuestionnaire, updateQuestionnaire, updateQuestionnaireJury, deleteQuestionnaire as deleteQuestionnaireApi, addCategory as addCategoryApi } from '../api/questionnaires.js'
 import { getStudentResults } from '../api/students.js'
 import { addQuestionToCategory as addQuestionToCategoryApi, deleteCategory as deleteCategoryApi, updateCategory as updateCategoryApi } from '../api/categories.js'
 import { listStudents } from '../api/students.js'
+import { listTeachers } from '../api/teachers.js'
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="left" ref={ref} {...props} />
@@ -53,6 +54,8 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const [questionnaire, setQuestionnaire] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(null)
+  const [availableTeachers, setAvailableTeachers] = useState([])
+  const [availableStudents, setAvailableStudents] = useState([])
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null)
   const pages = questionnaire && questionnaire.categories ? questionnaire.categories.map(c => ({ name: c.title, id: c.id })) : [{ name: 'Questions', id: null }]
@@ -77,6 +80,22 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       }
     }
   }
+
+  async function loadMembershipOptions() {
+    if (!canEdit) return
+    try {
+      const [teachersJson, studentsJson] = await Promise.all([listTeachers(), listStudents()])
+      setAvailableTeachers(Array.isArray(teachersJson) ? teachersJson : [])
+      setAvailableStudents(Array.isArray(studentsJson) ? studentsJson : [])
+    } catch (e) {
+      console.error('Failed to load questionnaire membership options', e)
+    }
+  }
+
+  useEffect(() => {
+    if (settingsOpen) loadMembershipOptions()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsOpen])
 
   useEffect(() => {
     // Teacher-only feature: list of candidates + viewing someone else's answers
@@ -227,6 +246,28 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     setQuestionnaire(q => ({ ...(q || {}), ...nextPatch }))
     try {
       await updateQuestionnaire(effectiveQuestionnaireId, nextPatch)
+    } catch (e) {
+      setError(e.message)
+      await load()
+    }
+  }
+
+  async function updateMembership(patch) {
+    if (!canEdit || !effectiveQuestionnaireId) return
+    const teacherIds = patch.teacherIds ?? (questionnaire?.juryMembers || []).map(t => t.id)
+    const studentIds = patch.studentIds ?? (questionnaire?.assignedStudents || []).map(s => s.id)
+    setQuestionnaire(q => ({
+      ...(q || {}),
+      juryMembers: availableTeachers.filter(t => teacherIds.map(String).includes(String(t.id))),
+      assignedStudents: availableStudents.filter(s => studentIds.map(String).includes(String(s.id))),
+    }))
+    try {
+      const updated = await updateQuestionnaireJury(effectiveQuestionnaireId, { teacherIds, studentIds })
+      setQuestionnaire(q => ({
+        ...(q || {}),
+        juryMembers: updated.teachers || [],
+        assignedStudents: updated.students || [],
+      }))
     } catch (e) {
       setError(e.message)
       await load()
@@ -765,6 +806,50 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 <MenuItem value="teachers">Enseignants uniquement</MenuItem>
                 <MenuItem value="students">Étudiants uniquement</MenuItem>
                 <MenuItem value="both">Enseignants et étudiants</MenuItem>
+              </Select>
+            </FormControl>
+
+            <Divider />
+
+            <FormControl fullWidth size="small">
+              <InputLabel id="questionnaire-jury-members-label">Jury du questionnaire</InputLabel>
+              <Select
+                labelId="questionnaire-jury-members-label"
+                label="Jury du questionnaire"
+                multiple
+                value={(questionnaire?.juryMembers || []).map(t => t.id)}
+                onChange={(event) => updateMembership({ teacherIds: event.target.value })}
+                renderValue={(selected) => {
+                  const labels = availableTeachers
+                    .filter(t => selected.map(String).includes(String(t.id)))
+                    .map(t => t.email)
+                  return labels.length ? labels.join(', ') : 'Aucun enseignant'
+                }}
+              >
+                {availableTeachers.map(t => (
+                  <MenuItem key={t.id} value={t.id}>{t.email}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+
+            <FormControl fullWidth size="small">
+              <InputLabel id="questionnaire-student-members-label">Étudiants associés</InputLabel>
+              <Select
+                labelId="questionnaire-student-members-label"
+                label="Étudiants associés"
+                multiple
+                value={(questionnaire?.assignedStudents || []).map(s => s.id)}
+                onChange={(event) => updateMembership({ studentIds: event.target.value })}
+                renderValue={(selected) => {
+                  const labels = availableStudents
+                    .filter(s => selected.map(String).includes(String(s.id)))
+                    .map(s => [s.nom, s.prenom].filter(Boolean).join(' ') || s.email)
+                  return labels.length ? labels.join(', ') : 'Aucun étudiant'
+                }}
+              >
+                {availableStudents.map(s => (
+                  <MenuItem key={s.id} value={s.id}>{[s.nom, s.prenom].filter(Boolean).join(' ') || s.email}</MenuItem>
+                ))}
               </Select>
             </FormControl>
 

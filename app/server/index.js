@@ -12,17 +12,41 @@ const app = express()
 app.use(cors())
 app.use(express.json())
 
-const JWT_SECRET = process.env.JWT_SECRET || ''
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex')
+if (!process.env.JWT_SECRET) {
+  console.warn('JWT_SECRET not set; using generated ephemeral secret (set JWT_SECRET env for stable sessions)')
+}
 
 // Initialize database schema
 async function initializeDatabase() {
   try {
     console.log('Checking database schema...')
-    // Prisma will handle migrations automatically, no need for manual schema checking
+    await ensureQuestionnaireMemberTables()
     console.log('✓ Database schema initialized')
   } catch (err) {
     console.error('Database initialization error:', err.message)
   }
+}
+
+async function ensureQuestionnaireMemberTables() {
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS QuestionnaireJuryMember (
+      questionnaireId INTEGER NOT NULL,
+      teacherId INTEGER NOT NULL,
+      PRIMARY KEY (questionnaireId, teacherId),
+      FOREIGN KEY (questionnaireId) REFERENCES Questionnaire(id) ON DELETE CASCADE,
+      FOREIGN KEY (teacherId) REFERENCES Teacher(id) ON DELETE CASCADE
+    )
+  `)
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE IF NOT EXISTS QuestionnaireStudentMember (
+      questionnaireId INTEGER NOT NULL,
+      studentId INTEGER NOT NULL,
+      PRIMARY KEY (questionnaireId, studentId),
+      FOREIGN KEY (questionnaireId) REFERENCES Questionnaire(id) ON DELETE CASCADE,
+      FOREIGN KEY (studentId) REFERENCES Student(id) ON DELETE CASCADE
+    )
+  `)
 }
 
 function authenticateToken(req, res, next) {
@@ -78,6 +102,50 @@ async function updateQuestionnaireSettings(id, settings) {
   )
 }
 
+async function getQuestionnaireMembers(questionnaireId) {
+  await ensureQuestionnaireMemberTables()
+  const teachers = await prisma.$queryRawUnsafe(
+    `SELECT t.id, t.email, t.jury, t.admin
+     FROM QuestionnaireJuryMember qjm
+     JOIN Teacher t ON t.id = qjm.teacherId
+     WHERE qjm.questionnaireId = ?
+     ORDER BY t.email`,
+    Number(questionnaireId)
+  )
+  const students = await prisma.$queryRawUnsafe(
+    `SELECT s.id, s.email, s.nom, s.prenom, s.assignedJury
+     FROM QuestionnaireStudentMember qsm
+     JOIN Student s ON s.id = qsm.studentId
+     WHERE qsm.questionnaireId = ?
+     ORDER BY s.nom, s.prenom, s.email`,
+    Number(questionnaireId)
+  )
+  return { teachers: teachers || [], students: students || [] }
+}
+
+async function replaceQuestionnaireMembers(questionnaireId, teacherIds = [], studentIds = []) {
+  await ensureQuestionnaireMemberTables()
+  const qid = Number(questionnaireId)
+  await prisma.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`DELETE FROM QuestionnaireJuryMember WHERE questionnaireId = ?`, qid)
+    await tx.$executeRawUnsafe(`DELETE FROM QuestionnaireStudentMember WHERE questionnaireId = ?`, qid)
+    for (const teacherId of [...new Set((teacherIds || []).map(Number).filter(Boolean))]) {
+      await tx.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO QuestionnaireJuryMember (questionnaireId, teacherId) VALUES (?, ?)`,
+        qid,
+        teacherId
+      )
+    }
+    for (const studentId of [...new Set((studentIds || []).map(Number).filter(Boolean))]) {
+      await tx.$executeRawUnsafe(
+        `INSERT OR IGNORE INTO QuestionnaireStudentMember (questionnaireId, studentId) VALUES (?, ?)`,
+        qid,
+        studentId
+      )
+    }
+  })
+}
+
 // Auth
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, role } = req.body
@@ -112,6 +180,7 @@ app.post('/api/auth/login', async (req, res) => {
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '8h' })
     return res.json({ token, user: { id: user.id, email: user.email, role } })
   } catch (err) {
+    console.error('Login error:', err)
     return res.status(500).json({ error: 'Login error' })
   }
 })
@@ -143,7 +212,9 @@ app.get('/api/questionnaires/:id', async (req, res) => {
     }
   })
   if (!questionnaire) return res.status(404).json({ error: 'Not found' })
-  res.json(await mergeQuestionnaireSettings(questionnaire))
+  const withSettings = await mergeQuestionnaireSettings(questionnaire)
+  const members = await getQuestionnaireMembers(id)
+  res.json({ ...withSettings, juryMembers: members.teachers, assignedStudents: members.students })
 })
 
 app.post('/api/questionnaires', authenticateToken, async (req, res) => {
@@ -177,6 +248,168 @@ app.put('/api/questionnaires/:id', authenticateToken, async (req, res) => {
     res.json(await mergeQuestionnaireSettings(updated))
   } catch (err) {
     res.status(404).json({ error: 'Not found' })
+  }
+})
+
+app.get('/api/questionnaires/:id/jury', authenticateToken, async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    const questionnaire = await prisma.questionnaire.findUnique({ where: { id }, select: { id: true } })
+    if (!questionnaire) return res.status(404).json({ error: 'Not found' })
+    res.json(await getQuestionnaireMembers(id))
+  } catch (err) {
+    console.error('Could not fetch questionnaire jury:', err.message)
+    res.status(500).json({ error: 'Could not fetch questionnaire jury' })
+  }
+})
+
+app.put('/api/questionnaires/:id/jury', authenticateToken, async (req, res) => {
+  try {
+    const { role } = req.user || {}
+    if (role !== 'teacher') return res.status(403).json({ error: 'Forbidden' })
+    const id = Number(req.params.id)
+    const { teacherIds, studentIds } = req.body
+    const questionnaire = await prisma.questionnaire.findUnique({ where: { id }, select: { id: true } })
+    if (!questionnaire) return res.status(404).json({ error: 'Not found' })
+    await replaceQuestionnaireMembers(id, teacherIds || [], studentIds || [])
+    res.json(await getQuestionnaireMembers(id))
+  } catch (err) {
+    console.error('Could not update questionnaire jury:', err.message)
+    res.status(500).json({ error: 'Could not update questionnaire jury' })
+  }
+})
+
+app.get('/api/questionnaires/:id/export', authenticateToken, async (req, res) => {
+  try {
+    const { role } = req.user || {}
+    if (role !== 'teacher') return res.status(403).json({ error: 'Forbidden' })
+    const id = Number(req.params.id)
+    const questionnaire = await prisma.questionnaire.findUnique({
+      where: { id },
+      include: {
+        categories: {
+          include: {
+            questions: {
+              include: { elements: true }
+            }
+          }
+        },
+        submissions: {
+          include: { student: true }
+        }
+      }
+    })
+    if (!questionnaire) return res.status(404).json({ error: 'Not found' })
+
+    const withSettings = await mergeQuestionnaireSettings(questionnaire)
+    const members = await getQuestionnaireMembers(id)
+    const payload = {
+      format: 'softwarenotes-questionnaire',
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      questionnaire: {
+        ...withSettings,
+        juryMembers: members.teachers,
+        assignedStudents: members.students,
+        submissions: (withSettings.submissions || []).map(s => ({
+          id: s.id,
+          studentEmail: s.student?.email || null,
+          answers: s.answers ? JSON.parse(s.answers) : [],
+          submittedAt: s.submittedAt
+        }))
+      }
+    }
+    res.setHeader('Content-Disposition', `attachment; filename="questionnaire-${id}.json"`)
+    res.json(payload)
+  } catch (err) {
+    console.error('Could not export questionnaire:', err.message)
+    res.status(500).json({ error: 'Could not export questionnaire' })
+  }
+})
+
+app.post('/api/questionnaires/import', authenticateToken, async (req, res) => {
+  try {
+    const { role } = req.user || {}
+    if (role !== 'teacher') return res.status(403).json({ error: 'Forbidden' })
+    const source = req.body && (req.body.questionnaire || req.body)
+    if (!source || !source.title) return res.status(400).json({ error: 'questionnaire export is required' })
+
+    const created = await prisma.$transaction(async (tx) => {
+      const questionnaire = await tx.questionnaire.create({
+        data: {
+          title: `${source.title} (import)`,
+          openForStudents: !!source.openForStudents
+        }
+      })
+
+      const categories = Array.isArray(source.categories) ? source.categories : []
+      for (const category of categories) {
+        const createdCategory = await tx.questionCategory.create({
+          data: {
+            title: category.title || 'Catégorie importée',
+            currentNote: Number(category.currentNote || 0),
+            questionnaireId: questionnaire.id
+          }
+        })
+
+        for (const question of (category.questions || [])) {
+          const createdQuestion = await tx.question.create({
+            data: {
+              title: question.title || 'Question importée',
+              questionCategoryId: createdCategory.id
+            }
+          })
+
+          for (const element of (question.elements || [])) {
+            await tx.questionElement.create({
+              data: {
+                type: element.type || 'radio',
+                title: element.title || 'Élément importé',
+                priority: Number(element.priority || 0),
+                evaluatingType: Number(element.evaluatingType || 0),
+                evaluatingValue: Number(element.evaluatingValue || 0),
+                questionId: createdQuestion.id
+              }
+            })
+          }
+        }
+      }
+
+      return questionnaire
+    })
+
+    await updateQuestionnaireSettings(created.id, {
+      gradingMode: source.gradingMode || 'points',
+      maxScore: source.maxScore === undefined ? 20 : Number(source.maxScore),
+      audience: source.audience || 'teachers',
+      showResults: !!source.showResults,
+      shuffleQuestions: !!source.shuffleQuestions
+    })
+
+    const teacherEmails = (source.juryMembers || []).map(t => t.email).filter(Boolean)
+    const studentEmails = (source.assignedStudents || []).map(s => s.email).filter(Boolean)
+    const teachers = teacherEmails.length
+      ? await prisma.teacher.findMany({ where: { email: { in: teacherEmails } }, select: { id: true, email: true } })
+      : []
+    const students = studentEmails.length
+      ? await prisma.student.findMany({ where: { email: { in: studentEmails } }, select: { id: true, email: true } })
+      : []
+
+    await replaceQuestionnaireMembers(
+      created.id,
+      teachers.map(t => t.id),
+      students.map(s => s.id)
+    )
+
+    res.status(201).json({
+      id: created.id,
+      questionnaireId: created.id,
+      missingTeachers: teacherEmails.filter(email => !teachers.some(t => t.email === email)),
+      missingStudents: studentEmails.filter(email => !students.some(s => s.email === email))
+    })
+  } catch (err) {
+    console.error('Could not import questionnaire:', err.message)
+    res.status(500).json({ error: 'Could not import questionnaire' })
   }
 })
 

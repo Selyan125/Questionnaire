@@ -7,6 +7,7 @@ import PieChartIcon from '@mui/icons-material/PieChart';
 import SchoolIcon from '@mui/icons-material/School';
 import PersonIcon from '@mui/icons-material/Person';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
+import DownloadIcon from '@mui/icons-material/Download';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
 import AdminImport from './AdminImport.jsx';
@@ -15,7 +16,8 @@ import TeachersView from '../components/TeachersView.jsx'
 import { useNavigate } from 'react-router-dom'
 import { getStats } from '../api/stats.js'
 import { listTeachers } from '../api/teachers.js'
-import { listQuestionnaires, createQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi } from '../api/questionnaires.js'
+import { listQuestionnaires, createQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi, importQuestionnaire } from '../api/questionnaires.js'
+import { apiFetch } from '../api/http.js'
 
 export default function Dashboard() {
   const [selectedMenu, setSelectedMenu] = useState(0);
@@ -26,6 +28,7 @@ export default function Dashboard() {
   const [user, setUser] = useState(null)
   const navigate = useNavigate()
   const [questionnaires, setQuestionnaires] = useState([])
+  const [importMessage, setImportMessage] = useState(null)
 
 
   useEffect(() => {
@@ -75,6 +78,50 @@ export default function Dashboard() {
       await loadDashboard()
     } catch (e) {
       console.error(e)
+    }
+  }
+
+  async function exportQuestionnaire(id) {
+    if (!id) return
+    try {
+      const resp = await apiFetch(`/api/questionnaires/${id}/export`)
+      if (!resp.ok) throw new Error(`Erreur serveur (${resp.status})`)
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `questionnaire-${id}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      console.error(e)
+      setImportMessage(e.message || 'Export impossible')
+    }
+  }
+
+  async function handleQuestionnaireImport(event) {
+    const file = event.target.files && event.target.files[0]
+    event.target.value = ''
+    if (!file) return
+    try {
+      const text = await file.text()
+      const payload = JSON.parse(text)
+      const imported = await importQuestionnaire(payload)
+      const missingTeachers = imported.missingTeachers || []
+      const missingStudents = imported.missingStudents || []
+      const missing = [
+        ...missingTeachers.map(email => `enseignant manquant: ${email}`),
+        ...missingStudents.map(email => `étudiant manquant: ${email}`),
+      ]
+      setImportMessage(missing.length ? `Questionnaire importé. ${missing.join(', ')}` : 'Questionnaire importé.')
+      await loadDashboard()
+      const id = imported.id || imported.questionnaireId
+      if (id) navigate(`/admin/question-manager/${id}`)
+    } catch (e) {
+      console.error(e)
+      setImportMessage('Import impossible: fichier JSON invalide ou incompatible')
     }
   }
 
@@ -183,6 +230,10 @@ export default function Dashboard() {
                         navigate('/admin/question-manager')
                       }
                     }} sx={{ textTransform: 'none' }}>Nouveau questionnaire</Button>
+                    <Button variant="text" component="label" startIcon={<UploadFileIcon />} sx={{ textTransform: 'none' }}>
+                      Importer questionnaire
+                      <input type="file" accept="application/json,.json" hidden onChange={handleQuestionnaireImport} />
+                    </Button>
 
 
                   </Box>
@@ -233,6 +284,7 @@ export default function Dashboard() {
               </Grid>
 
               {errorStats && <Typography color="error">{errorStats}</Typography>}
+              {importMessage && <Typography sx={{ color: 'text.secondary', mb: 1 }}>{importMessage}</Typography>}
 
               
               <Box sx={{ mt: 3 }}>
@@ -252,6 +304,16 @@ export default function Dashboard() {
                             <Button size="small" variant="text" onClick={() => navigate(`/questionnaire/${q.id}`)} sx={{ textTransform: 'none' }}>Ouvrir (Enseignant)</Button>
                             {isAdmin && (
                               <>
+                                <IconButton
+                                  size="small"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    exportQuestionnaire(q.id)
+                                  }}
+                                  title="Exporter le questionnaire"
+                                >
+                                  <DownloadIcon fontSize="small" />
+                                </IconButton>
                                 <Button size="small" variant="text" onClick={() => navigate(`/admin/questionnaire/${q.id}/results`)} sx={{ textTransform: 'none' }}>Voir résultats</Button>
                                 <IconButton
                                   size="small"
