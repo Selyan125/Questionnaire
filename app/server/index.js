@@ -134,7 +134,7 @@ async function replaceQuestionnaireMembers(questionnaireId, teacherIds = [], stu
         `INSERT OR IGNORE INTO QuestionnaireJuryMember (questionnaireId, teacherId) VALUES (?, ?)`,
         qid,
         teacherId
-      )
+      ) 
     }
     for (const studentId of [...new Set((studentIds || []).map(Number).filter(Boolean))]) {
       await tx.$executeRawUnsafe(
