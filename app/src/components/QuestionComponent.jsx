@@ -256,7 +256,7 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
 
     return (
         <Card
-            elevation={0.5}
+            //elevation={0.5}
             sx={{
                 borderRadius: 4,
                 p: 2.5,

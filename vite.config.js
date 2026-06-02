@@ -13,5 +13,8 @@ export default defineConfig({
         secure: false,
       },
     },
+    watch: {
+      ignored: ['**/node_modules/**'],
+    },
   },
 })
