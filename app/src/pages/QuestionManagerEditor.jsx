@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   Stack,
   Box,
@@ -9,6 +9,9 @@ import {
   Paper,
   Drawer,
   Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
   Slide,
   Divider,
   FormControl,
@@ -20,6 +23,7 @@ import {
   Switch,
   Radio,
   Checkbox,
+  Chip,
 } from '@mui/material'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -56,17 +60,54 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const [previewMode, setPreviewMode] = useState(null)
   const [availableTeachers, setAvailableTeachers] = useState([])
   const [availableStudents, setAvailableStudents] = useState([])
+  const [juryDialogOpen, setJuryDialogOpen] = useState(false)
+  const [juryGroups, setJuryGroups] = useState([])
+  const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false)
+  const [sessions, setSessions] = useState([])
+  const [selectedSessionId, setSelectedSessionId] = useState(null)
+  const [dragOverTarget, setDragOverTarget] = useState(null)
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null)
   const pages = questionnaire && questionnaire.categories ? questionnaire.categories.map(c => ({ name: c.title, id: c.id })) : [{ name: 'Questions', id: null }]
   const [selectedPageIndex, setSelectedPageIndex] = useState(0)
 
+  function safeParseJSON(value) {
+    if (typeof value !== 'string') return value
+    try {
+      return JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+
+  function buildSessionsFromQuestionnaire() {
+    const raw = questionnaire?.sessions
+    const parsed = typeof raw === 'string' ? safeParseJSON(raw) : Array.isArray(raw) ? raw : []
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((session, index) => ({
+      id: session && session.id ? session.id : `session-${index + 1}`,
+      name: session && session.name ? session.name : `Session ${index + 1}`,
+      studentIds: Array.isArray(session && session.studentIds) ? session.studentIds : [],
+    }))
+  }
+
   // students sidebar state: controlled by parent via propShowStudentsSidebar
   const [students, setStudents] = useState([])
   const [selectedStudentId, setSelectedStudentId] = useState(null)
-  const [showStudentsSidebar, setShowStudentsSidebar] = useState(!!(typeof propShowStudentsSidebar !== 'undefined' ? propShowStudentsSidebar : false))
+  const showStudentsSidebar = viewerMode === 'teacher' && !!propShowStudentsSidebar
+  const sessionsList = buildSessionsFromQuestionnaire()
+  const selectedSession = sessionsList.find(s => String(s.id) === String(selectedSessionId))
+  const visibleStudents = selectedSession && selectedSession.studentIds && selectedSession.studentIds.length > 0
+    ? (questionnaire?.assignedStudents || []).filter(s => selectedSession.studentIds.map(String).includes(String(s.id)))
+    : (questionnaire?.assignedStudents || [])
 
-  async function loadStudents() {
+  useEffect(() => {
+    if (!selectedSessionId && sessionsList.length) {
+      setSelectedSessionId(sessionsList[0].id)
+    }
+  }, [sessionsList, selectedSessionId])
+
+  const loadStudents = useCallback(async () => {
     try {
       const s = await listStudents()
       setStudents(Array.isArray(s) ? s : [])
@@ -75,13 +116,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       console.error('Failed to load students', e)
       // If the API forbids access (student user), hide the sidebar to avoid exposing UI
       if (e && (e.status === 401 || e.status === 403)) {
-        setShowStudentsSidebar(false)
+      
         setStudents([])
       }
     }
-  }
+  }, [selectedStudentId])
 
-  async function loadMembershipOptions() {
+  const loadMembershipOptions = useCallback(async () => {
     if (!canEdit) return
     try {
       const [teachersJson, studentsJson] = await Promise.all([listTeachers(), listStudents()])
@@ -90,24 +131,29 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     } catch (e) {
       console.error('Failed to load questionnaire membership options', e)
     }
-  }
+  }, [canEdit])
+
+    useEffect(() => {
+    if (settingsOpen) {
+      loadMembershipOptions()
+    }
+  }, [settingsOpen, loadMembershipOptions])
 
   useEffect(() => {
-    if (settingsOpen) loadMembershipOptions()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsOpen])
-
-  useEffect(() => {
-    // Teacher-only feature: list of candidates + viewing someone else's answers
     if (viewerMode !== 'teacher') {
-      setShowStudentsSidebar(false)
       setStudents([])
       return
     }
 
-    setShowStudentsSidebar(!!propShowStudentsSidebar)
-    if (readOnly && !!propShowStudentsSidebar) loadStudents()
-  }, [readOnly, propShowStudentsSidebar, viewerMode])
+    if (readOnly && showStudentsSidebar) {
+      loadStudents()
+    }
+  }, [
+    readOnly,
+    viewerMode,
+    showStudentsSidebar,
+    loadStudents,
+  ])
 
   // when selected student changes, load their answers for this questionnaire
   useEffect(() => {
@@ -144,7 +190,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [selectedStudentId, effectiveQuestionnaireId, viewerMode])
 
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!effectiveQuestionnaireId) return
     setLoading(true)
     setError(null)
@@ -156,9 +202,39 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     } finally {
       setLoading(false)
     }
-  }
+  }, [effectiveQuestionnaireId])
 
-  useEffect(() => { load() }, [effectiveQuestionnaireId])
+  useEffect(() => {
+    load()
+  }, [load])
+
+  useEffect(() => {
+    const cats =
+      questionnaire?.categories ?? []
+
+    if (!cats.length) {
+      setSelectedCategoryId(null)
+      setSelectedPageIndex(0)
+      return
+    }
+
+    const ids = cats.map(c => c.id)
+
+    const nextId =
+      ids.includes(selectedCategoryId)
+        ? selectedCategoryId
+        : cats[0].id
+
+    setSelectedCategoryId(nextId)
+
+    setSelectedPageIndex(
+      Math.max(
+        0,
+        cats.findIndex(c => c.id === nextId)
+      )
+    )
+  }, [questionnaire])
+
   useEffect(() => {
     const cats = (questionnaire && Array.isArray(questionnaire.categories)) ? questionnaire.categories : []
     if (!cats.length) {
@@ -176,37 +252,45 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [questionnaire, selectedCategoryId])
 
 
-  function flattenQuestions() {
-    if (!questionnaire || !questionnaire.categories) return []
-    const out = []
-    for (const c of questionnaire.categories) {
-      if (selectedCategoryId && c.id !== selectedCategoryId) continue
-      for (const q of (c.questions || [])) out.push({ category: c, question: q })
-    }
-    return out
-  }
-
   // answers map collected from child QuestionComponent
   const [collectedAnswers, setCollectedAnswers] = useState({})
 
-  function handleAnswerChange(questionId, answer) {
-    setCollectedAnswers(prev => {
-      const next = { ...(prev || {}) }
-      next[questionId] = answer
-      try { localStorage.setItem(`answers_${effectiveQuestionnaireId}`, JSON.stringify(next)) } catch (e) {}
-      return next
-    })
-  }
+  const handleAnswerChange =
+  useCallback((questionId, answer) => {
+    setCollectedAnswers(prev => ({
+      ...prev,
+      [questionId]: answer,
+    }))
+  }, [])
 
   // try to restore saved answers from localStorage on mount
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(`answers_${effectiveQuestionnaireId}`)
-      if (raw) {
-        setCollectedAnswers(JSON.parse(raw))
-      }
-    } catch (e) {}
+  try {
+    const raw =
+      localStorage.getItem(
+        `answers_${effectiveQuestionnaireId}`
+      )
+
+    setCollectedAnswers(
+      raw ? JSON.parse(raw) : {}
+    )
+  } catch {
+    setCollectedAnswers({})
+  }
   }, [effectiveQuestionnaireId])
+  useEffect(() => {
+    try {
+      localStorage.setItem(
+        `answers_${effectiveQuestionnaireId}`,
+        JSON.stringify(
+          collectedAnswers
+        )
+      )
+    } catch {}
+  }, [
+    effectiveQuestionnaireId,
+    collectedAnswers,
+  ])
 
 
   function openPreview(mode) {
@@ -274,6 +358,127 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
+  function buildJuryGroupsFromQuestionnaire() {
+    const rawGroups = questionnaire?.juryGroups
+    let groups = []
+
+    if (Array.isArray(rawGroups)) {
+      groups = rawGroups
+    } else if (typeof rawGroups === 'string' && rawGroups.trim()) {
+      try {
+        groups = JSON.parse(rawGroups)
+      } catch {
+        groups = []
+      }
+    }
+
+    if (Array.isArray(groups) && groups.length) {
+      return groups.map((group, index) => ({
+        id: group.id || `group-${Date.now()}-${index}`,
+        name: group.name || `Groupe ${index + 1}`,
+        teacherIds: Array.isArray(group.teacherIds) ? group.teacherIds : [],
+        studentIds: Array.isArray(group.studentIds) ? group.studentIds : [],
+      }))
+    }
+
+    return [
+      {
+        id: `group-${Date.now()}`,
+        name: 'Jury principal',
+        teacherIds: (questionnaire?.juryMembers || []).map(t => t.id),
+        studentIds: (questionnaire?.assignedStudents || []).map(s => s.id),
+      },
+    ]
+  }
+
+  async function saveJuryGroups() {
+    if (!canEdit || !effectiveQuestionnaireId) return
+    const teacherIds = Array.from(new Set(juryGroups.flatMap(g => g.teacherIds))).filter(Boolean)
+    const studentIds = Array.from(new Set(juryGroups.flatMap(g => g.studentIds))).filter(Boolean)
+    const groupsPayload = juryGroups.map(({ id, name, teacherIds, studentIds }) => ({
+      id,
+      name: name || 'Groupe',
+      teacherIds: Array.isArray(teacherIds) ? teacherIds : [],
+      studentIds: Array.isArray(studentIds) ? studentIds : [],
+    }))
+
+    try {
+      await Promise.all([
+        updateQuestionnaire(effectiveQuestionnaireId, { juryGroups: groupsPayload }),
+        updateQuestionnaireJury(effectiveQuestionnaireId, { teacherIds, studentIds }),
+      ])
+      setQuestionnaire(q => ({
+        ...(q || {}),
+        juryGroups: groupsPayload,
+        juryMembers: availableTeachers.filter(t => teacherIds.map(String).includes(String(t.id))),
+        assignedStudents: availableStudents.filter(s => studentIds.map(String).includes(String(s.id))),
+      }))
+      setJuryDialogOpen(false)
+    } catch (e) {
+      setError(e.message)
+    }
+  }
+
+  function openJuryDialog() {
+    setJuryGroups(buildJuryGroupsFromQuestionnaire())
+    setJuryDialogOpen(true)
+  }
+
+  function openSessionsDialog() {
+    setSessions(buildSessionsFromQuestionnaire())
+    setSessionsDialogOpen(true)
+  }
+
+  async function saveSessions() {
+    const sessionsPayload = sessions.map(session => ({
+      id: session.id,
+      name: session.name,
+      studentIds: Array.isArray(session.studentIds) ? session.studentIds : [],
+    }))
+    try {
+      const updated = await updateQuestionnaire(effectiveQuestionnaireId, { sessions: sessionsPayload })
+      setQuestionnaire(updated)
+      setSessionsDialogOpen(false)
+    } catch (err) {
+      console.error('Could not save sessions', err)
+    }
+  }
+
+  function addJuryGroup() {
+    setJuryGroups(prev => [
+      ...prev,
+      {
+        id: `group-${Date.now()}-${prev.length + 1}`,
+        name: `Groupe ${prev.length + 1}`,
+        teacherIds: [],
+        studentIds: [],
+      },
+    ])
+  }
+
+  function updateJuryGroup(groupId, patch) {
+    setJuryGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...patch } : g))
+  }
+
+  function removeJuryGroup(groupId) {
+    setJuryGroups(prev => prev.filter(g => g.id !== groupId))
+  }
+
+  function addParticipantToGroup(groupId, type, id) {
+    setJuryGroups(prev => prev.map(g => {
+      if (g.id !== groupId) return g
+      const key = type === 'teacher' ? 'teacherIds' : 'studentIds'
+      const ids = g[key] || []
+      if (ids.map(String).includes(String(id))) return g
+      return { ...g, [key]: [...ids, id] }
+    }))
+  }
+
+  function removeParticipantFromGroup(groupId, type, id) {
+    const key = type === 'teacher' ? 'teacherIds' : 'studentIds'
+    setJuryGroups(prev => prev.map(g => g.id === groupId ? { ...g, [key]: g[key].filter(item => String(item) !== String(id)) } : g))
+  }
+
   async function deleteCurrentCategory() {
     if (!canEdit) return
     if (!selectedCategoryId) return
@@ -329,7 +534,23 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
-  const flat = flattenQuestions()
+  const flat = useMemo(() => {
+  if (!questionnaire?.categories)
+    return []
+
+  return questionnaire.categories.flatMap(c =>
+    selectedCategoryId &&
+    c.id !== selectedCategoryId
+      ? []
+      : (c.questions || []).map(q => ({
+          category: c,
+          question: q,
+        }))
+  )
+}, [
+  questionnaire,
+  selectedCategoryId,
+])
   const selectedCategory = useMemo(() => {
     const cats = questionnaire && Array.isArray(questionnaire.categories) ? questionnaire.categories : []
     return cats.find(c => c.id === selectedCategoryId) || null
@@ -382,10 +603,26 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     return 'non noté'
   }
 
-  if (!effectiveQuestionnaireId) {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    useEffect(() => navigate('/dashboard'))
-  }
+  useEffect(() => {
+    if (!effectiveQuestionnaireId) {
+      navigate('/dashboard')
+    }
+  }, [
+    effectiveQuestionnaireId,
+    navigate,
+  ])
+
+  const selectPage = useCallback(
+  (idx) => {
+    setSelectedPageIndex(idx)
+
+    const p = pages[idx]
+    setSelectedCategoryId(
+      p?.id ?? null
+    )
+  },
+  [pages]
+)
 
   return (
     <>
@@ -393,11 +630,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         <TopAppBar
           pages={pages}
           selectedPage={selectedPageIndex}
-          onSelectPage={(idx) => { setSelectedPageIndex(idx); const p = pages[idx]; setSelectedCategoryId(p && p.id ? p.id : null); }}
+          onSelectPage={selectPage}
           onAddCategory={canEdit ? addCategory : undefined}
           onRenamePage={canEdit ? renameCategory : undefined}
           title={questionnaire && questionnaire.title}
           onTitleChange={canEdit ? saveQuestionnaireTitle : undefined}
+          date={questionnaire?.date}
+          onDateChange={canEdit ? (newDate) => updateQuestionnaireSettings({ date: newDate }) : undefined}
           centerActions={canEdit ? (
             <Paper
               elevation={0}
@@ -483,40 +722,55 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'stretch', gap: readOnly && viewerMode === 'teacher' && showStudentsSidebar ? 2 : 1, flex: 1, pt: '76px', minHeight: 0 }}>
           {/* When readOnly, show students list on the left like the design */}
           {readOnly && viewerMode === 'teacher' && showStudentsSidebar && (
-            <Box sx={{ width: { xs: 80, sm: 220 }, flex: '0 0 auto', px: 1, pr: 2 }}>
+            <Box sx={{ width: { xs: 80, sm: 240 }, flex: '0 0 auto', px: 1, pr: 2 }}>
               <Paper sx={{ p: 2, borderRadius: 2, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.06)', height: '100%' }}>
-                <Typography sx={{ fontWeight: 700, mb: 2, fontSize: 16, textAlign: 'center' }}>Candidats</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: 'calc(100vh - 240px)', overflowY: 'auto' }}>
-                  {students && students.length ? students.map(s => (
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: 16 }}>Sessions</Typography>
+                  <Button size="small" variant="outlined" onClick={openSessionsDialog}>
+                    Gérer
+                  </Button>
+                </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2, maxHeight: 220, overflowY: 'auto' }}>
+                  {sessionsList && sessionsList.length ? sessionsList.map(session => (
+                    <Button
+                      key={session.id}
+                      fullWidth
+                      variant={String(selectedSessionId) === String(session.id) ? 'contained' : 'outlined'}
+                      onClick={() => setSelectedSessionId(session.id)}
+                      sx={{ textTransform: 'none', justifyContent: 'flex-start', borderRadius: 4.5, p: 1.5, fontSize: 13 }}
+                    >
+                      {session.name}
+                    </Button>
+                  )) : (
+                    <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>Aucune session</Typography>
+                  )}
+                </Box>
+                <Typography sx={{ fontWeight: 700, mb: 1, fontSize: 14 }}>Étudiants</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: 'calc(100vh - 320px)', overflowY: 'auto' }}>
+                  {visibleStudents && visibleStudents.length ? visibleStudents.map(s => (
                     <Box key={s.id || s._id} sx={{ px: 0.5 }}>
                       <Button
                         fullWidth
                         variant={selectedStudentId && String(selectedStudentId) === String(s.id || s._id) ? 'contained' : 'outlined'}
-                        onClick={() => {
-                          setSelectedStudentId(s.id || s._id);
-                        }}
-                        sx={{ 
-                          textTransform: 'none', 
-                          justifyContent: 'flex-start', 
+                        onClick={() => setSelectedStudentId(s.id || s._id)}
+                        sx={{
+                          textTransform: 'none',
+                          justifyContent: 'flex-start',
                           borderRadius: 4.5,
-                          p: 3,
-                          py: selectedStudentId && String(selectedStudentId) === String(s.id || s._id) ? 1.7 : 1.5, 
+                          p: 1.75,
                           fontSize: 13,
-                          textOverflow: 'ellipsis', 
+                          textOverflow: 'ellipsis',
                           overflow: 'hidden',
-                          transition: 'all 0.2s ease'
+                          transition: 'all 0.2s ease',
                         }}
                       >
                         {(() => {
-                          // Use same format as TeachersView: nom (lastName) THEN prenom (firstName)
                           const last = s.nom || s.lastName || s.name || '';
                           const first = s.prenom || s.firstName || '';
                           const fullname = [last, first].filter(Boolean).join(' ').trim();
-                          
-                          // If we have a name, use it. Otherwise use email
                           if (fullname) return fullname;
                           if (s.email) return s.email;
-                          return 'Candidat';
+                          return 'Étudiant';
                         })()}
                       </Button>
                     </Box>
@@ -769,9 +1023,16 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               type="number"
               size="small"
               value={questionnaire?.maxScore ?? 20}
-              onChange={(event) => setQuestionnaire(q => ({ ...(q || {}), maxScore: Number(event.target.value) }))}
-              onBlur={(event) => updateQuestionnaireSettings({ maxScore: Number(event.target.value) || 0 })}
-              inputProps={{ min: 0, step: 0.5 }}
+              onChange={(event) => {
+                const raw = event.target.value;
+                setQuestionnaire(q => ({ ...(q || {}), maxScore: raw === '' ? '' : parseFloat(raw) }));
+              }}
+              onBlur={(event) => {
+                const raw = event.target.value;
+                const nextValue = raw === '' ? 0 : parseFloat(raw);
+                updateQuestionnaireSettings({ maxScore: Number.isNaN(nextValue) ? 0 : nextValue });
+              }}
+              inputProps={{ min: 0, step: 0.1 }}
               fullWidth
             />
 
@@ -789,69 +1050,29 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               </Select>
             </FormControl>
 
-            <FormControl fullWidth size="small">
-              <InputLabel id="questionnaire-audience-label">Accessible pour</InputLabel>
-              <Select
-                labelId="questionnaire-audience-label"
-                label="Accessible pour"
-                value={questionnaire?.audience || 'teachers'}
-                onChange={(event) => {
-                  const audience = event.target.value
-                  updateQuestionnaireSettings({
-                    audience,
-                    openForStudents: audience !== 'teachers',
-                  })
-                }}
-              >
-                <MenuItem value="teachers">Enseignants uniquement</MenuItem>
-                <MenuItem value="students">Étudiants uniquement</MenuItem>
-                <MenuItem value="both">Enseignants et étudiants</MenuItem>
-              </Select>
-            </FormControl>
-
-            <Divider />
-
-            <FormControl fullWidth size="small">
-              <InputLabel id="questionnaire-jury-members-label">Jury du questionnaire</InputLabel>
-              <Select
-                labelId="questionnaire-jury-members-label"
-                label="Jury du questionnaire"
-                multiple
-                value={(questionnaire?.juryMembers || []).map(t => t.id)}
-                onChange={(event) => updateMembership({ teacherIds: event.target.value })}
-                renderValue={(selected) => {
-                  const labels = availableTeachers
-                    .filter(t => selected.map(String).includes(String(t.id)))
-                    .map(t => t.email)
-                  return labels.length ? labels.join(', ') : 'Aucun enseignant'
-                }}
-              >
-                {availableTeachers.map(t => (
-                  <MenuItem key={t.id} value={t.id}>{t.email}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-
-            <FormControl fullWidth size="small">
-              <InputLabel id="questionnaire-student-members-label">Étudiants associés</InputLabel>
-              <Select
-                labelId="questionnaire-student-members-label"
-                label="Étudiants associés"
-                multiple
-                value={(questionnaire?.assignedStudents || []).map(s => s.id)}
-                onChange={(event) => updateMembership({ studentIds: event.target.value })}
-                renderValue={(selected) => {
-                  const labels = availableStudents
-                    .filter(s => selected.map(String).includes(String(s.id)))
-                    .map(s => [s.nom, s.prenom].filter(Boolean).join(' ') || s.email)
-                  return labels.length ? labels.join(', ') : 'Aucun étudiant'
-                }}
-              >
-                {availableStudents.map(s => (
-                  <MenuItem key={s.id} value={s.id}>{[s.nom, s.prenom].filter(Boolean).join(' ') || s.email}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+            <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.08)', bgcolor: 'background.paper' }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1 }}>
+                <Box>
+                  <Typography sx={{ fontSize: 14, fontWeight: 600 }}>Groupes de jury</Typography>
+                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>Gérez les enseignants et étudiants par groupe</Typography>
+                </Box>
+                <Button size="small" variant="outlined" onClick={openJuryDialog} sx={{ borderRadius: 8, textTransform: 'none' }}>
+                  Gérer les groupes de jury
+                </Button>
+              </Box>
+              <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Enseignants</Typography>
+              <Typography sx={{ fontSize: 14, mb: 1 }}>
+                {questionnaire?.juryMembers?.length
+                  ? questionnaire.juryMembers.map(t => t.email).join(', ')
+                  : 'Aucun enseignant assigné'}
+              </Typography>
+              <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Étudiants</Typography>
+              <Typography sx={{ fontSize: 14 }}>
+                {questionnaire?.assignedStudents?.length
+                  ? questionnaire.assignedStudents.map(s => [s.nom, s.prenom].filter(Boolean).join(' ') || s.email).join(', ')
+                  : 'Aucun étudiant associé'}
+              </Typography>
+            </Paper>
 
             <Divider />
 
@@ -894,6 +1115,177 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         </Box>
       </Drawer>
       <Dialog
+        fullWidth
+        maxWidth="lg"
+        open={juryDialogOpen}
+        onClose={() => setJuryDialogOpen(false)}
+        PaperProps={{ sx: { borderRadius: 12, overflow: 'hidden' } }}
+      >
+        <DialogTitle sx={{ color: 'text.primary', bgcolor: 'background.default', borderBottom: '1px solid rgba(0,0,0,0.08)', py: 2 }}>
+          Gérer les groupes de jury
+        </DialogTitle>
+        <DialogContent dividers sx={{ bgcolor: 'background.default', p: 3 }}>
+          <Box sx={{ display: 'flex', gap: 2, minHeight: 520, alignItems: 'stretch', flexWrap: 'wrap' }}>
+            <Box sx={{ flex: 1.3, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 320, maxHeight: 520, overflowY: 'auto' }}>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+                <Typography sx={{ fontWeight: 700 }}>Liste des groupes</Typography>
+                <Button size="small" variant="outlined" onClick={addJuryGroup} sx={{ borderRadius: 8, textTransform: 'none' }}>
+                  Ajouter un groupe
+                </Button>
+              </Box>
+              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {juryGroups.map(group => (
+                  <Paper key={group.id} elevation={0} sx={{ p: 2, border: '1px solid rgba(0,0,0,0.12)', borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <TextField
+                        value={group.name}
+                        onChange={(event) => updateJuryGroup(group.id, { name: event.target.value })}
+                        label="Nom du groupe"
+                        size="small"
+                        fullWidth
+                      />
+                      <IconButton size="small" onClick={() => removeJuryGroup(group.id)}>
+                        <DeleteIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+                    <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Enseignants</Typography>
+                    <Box
+                      onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`${group.id}-teacher`) }}
+                      onDragLeave={() => setDragOverTarget(null)}
+                      onDrop={(e) => {
+                        e.preventDefault(); setDragOverTarget(null)
+                        try {
+                          const payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
+                          if (payload.type === 'teacher' && payload.id) addParticipantToGroup(group.id, 'teacher', payload.id)
+                        } catch {}
+                      }}
+                      sx={{
+                        minHeight: 64,
+                        p: 1,
+                        borderRadius: 1,
+                        border: '1px dashed rgba(0,0,0,0.18)',
+                        bgcolor: dragOverTarget === `${group.id}-teacher` ? 'rgba(0,0,0,0.04)' : 'transparent',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 1,
+                        alignItems: 'center',
+                      }}
+                    >
+                      {group.teacherIds.length > 0 ? group.teacherIds.map((teacherId) => {
+                        const teacher = availableTeachers.find(t => String(t.id) === String(teacherId))
+                        if (!teacher) return null
+                        return (
+                          <Chip
+                            key={`teacher-${group.id}-${teacher.id}`}
+                            label={teacher.email}
+                            size="small"
+                            onDelete={() => removeParticipantFromGroup(group.id, 'teacher', teacher.id)}
+                            draggable
+                            onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'teacher', id: teacher.id }))}
+                          />
+                        )
+                      }) : (
+                        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Glissez des enseignants ici</Typography>
+                      )}
+                    </Box>
+                    <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1, mt: 2 }}>Étudiants</Typography>
+                    <Box
+                      onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`${group.id}-student`) }}
+                      onDragLeave={() => setDragOverTarget(null)}
+                      onDrop={(e) => {
+                        e.preventDefault(); setDragOverTarget(null)
+                        try {
+                          const payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
+                          if (payload.type === 'student' && payload.id) addParticipantToGroup(group.id, 'student', payload.id)
+                        } catch {}
+                      }}
+                      sx={{
+                        minHeight: 64,
+                        p: 1,
+                        borderRadius: 1,
+                        border: '1px dashed rgba(0,0,0,0.18)',
+                        bgcolor: dragOverTarget === `${group.id}-student` ? 'rgba(0,0,0,0.04)' : 'transparent',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 1,
+                        alignItems: 'center',
+                      }}
+                    >
+                      {group.studentIds.length > 0 ? group.studentIds.map((studentId) => {
+                        const student = availableStudents.find(s => String(s.id) === String(studentId))
+                        if (!student) return null
+                        const name = [student.nom, student.prenom].filter(Boolean).join(' ') || student.email
+                        return (
+                          <Chip
+                            key={`student-${group.id}-${student.id}`}
+                            label={name}
+                            size="small"
+                            onDelete={() => removeParticipantFromGroup(group.id, 'student', student.id)}
+                            draggable
+                            onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'student', id: student.id }))}
+                          />
+                        )
+                      }) : (
+                        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Glissez des étudiants ici</Typography>
+                      )}
+                    </Box>
+                  </Paper>
+                ))}
+              </Box>
+            </Box>
+            <Box sx={{ flex: 0.9, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 280, maxHeight: 520, overflowY: 'auto' }}>
+              <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.12)' }}>
+                <Typography sx={{ fontWeight: 700, mb: 1 }}>Enseignants</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {availableTeachers.map((teacher) => {
+                    const assignedCount = juryGroups.filter(g => g.teacherIds.map(String).includes(String(teacher.id))).length
+                    return (
+                      <Box
+                        key={teacher.id}
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'teacher', id: teacher.id }))}
+                        sx={{ p: 1, borderRadius: 1, bgcolor: 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}
+                      >
+                        <Typography sx={{ fontSize: 14 }}>{teacher.email}</Typography>
+                        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{assignedCount ? `${assignedCount} groupe${assignedCount > 1 ? 's' : ''}` : 'non assigné'}</Typography>
+                      </Box>
+                    )
+                  })}
+                </Box>
+              </Paper>
+              <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.12)' }}>
+                <Typography sx={{ fontWeight: 700, mb: 1 }}>Étudiants</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {availableStudents.map((student) => {
+                    const assignedCount = juryGroups.filter(g => g.studentIds.map(String).includes(String(student.id))).length
+                    const name = [student.nom, student.prenom].filter(Boolean).join(' ') || student.email
+                    return (
+                      <Box
+                        key={student.id}
+                        draggable
+                        onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'student', id: student.id }))}
+                        sx={{ p: 1, borderRadius: 1, bgcolor: 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}
+                      >
+                        <Typography sx={{ fontSize: 14 }}>{name}</Typography>
+                        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{assignedCount ? `${assignedCount} groupe${assignedCount > 1 ? 's' : ''}` : 'non assigné'}</Typography>
+                      </Box>
+                    )
+                  })}
+                </Box>
+              </Paper>
+            </Box>
+          </Box>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, py: 2, gap: 1, bgcolor: 'background.default', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
+          <Button variant="text" onClick={() => setJuryDialogOpen(false)} sx={{ borderRadius: 8, textTransform: 'none' }}>
+            Annuler
+          </Button>
+          <Button variant="outlined" onClick={saveJuryGroups} sx={{ borderRadius: 8, textTransform: 'none' }}>
+            Enregistrer
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog
         fullScreen
         open={!!previewMode}
         onClose={() => setPreviewMode(null)}
@@ -906,10 +1298,12 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
             <TopAppBar
               pages={pages}
               selectedPage={selectedPageIndex}
-              onSelectPage={(idx) => { setSelectedPageIndex(idx); const p = pages[idx]; setSelectedCategoryId(p && p.id ? p.id : null); }}
+              onSelectPage={selectPage}
               title={questionnaire && questionnaire.title}
               onTitleChange={undefined}
               onAddCategory={undefined}
+              date={questionnaire?.date}
+              onDateChange={undefined}
               centerActions={previewMode === 'teacher' ? (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.12)', px: 2, py: 0.75, borderRadius: 2 }}>
                   <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>

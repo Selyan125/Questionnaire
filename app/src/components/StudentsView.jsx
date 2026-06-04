@@ -1,17 +1,17 @@
 import React, { useEffect, useState } from 'react'
 import {
-  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow, Select, MenuItem,
-  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment, Switch
+  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
+  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import AddIcon from '@mui/icons-material/Add'
-import { listStudents, listJuries, assignStudentJury, createStudent, updateStudent } from '../api/students.js'
+import { listStudents, createStudent, updateStudent, generateStudentPassword } from '../api/students.js'
 import { listTeachers } from '../api/teachers.js'
 import { useNavigate } from 'react-router-dom'
 
 export default function StudentsView() {
   const [students, setStudents] = useState([])
-  const [juries, setJuries] = useState([])
+  
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -31,13 +31,11 @@ export default function StudentsView() {
     setLoading(true)
     setError(null)
     try {
-      const [sJson, jJson, tJson] = await Promise.all([
+      const [sJson, tJson] = await Promise.all([
         listStudents(),
-        listJuries(),
         listTeachers(),
       ])
       setStudents(sJson)
-      setJuries((jJson || []).map(j => j.name))
       // determine admin status from teachers list and current user
       const raw = localStorage.getItem('authUser')
       let current = null
@@ -60,10 +58,18 @@ export default function StudentsView() {
 
   useEffect(() => { load() }, [])
 
-  async function assignJury(studentId, juryName) {
+  // generate/reset password (admin only)
+  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
+  const [generatedPassword, setGeneratedPassword] = useState(null)
+  const [generatedFor, setGeneratedFor] = useState(null)
+
+  async function handleGeneratePassword(student) {
     try {
-      await assignStudentJury(studentId, juryName)
-      await load()
+      const resp = await generateStudentPassword(student.id)
+      const pass = resp && resp.password ? resp.password : null
+      setGeneratedPassword(pass)
+      setGeneratedFor(student.email)
+      setPasswordDialogOpen(true)
     } catch (err) {
       setError(err.message)
     }
@@ -113,6 +119,21 @@ export default function StudentsView() {
     }
   }
 
+  async function toggleTest(student) {
+    try {
+      await updateStudent(student.id, { isTest: !student.isTest })
+      // update local state
+      const idx = students.findIndex(s => s.id === student.id)
+      if (idx !== -1) {
+        const copy = [...students]
+        copy[idx].isTest = !student.isTest
+        setStudents(copy)
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
   const filtered = students.filter(s => s.email.toLowerCase().includes(filter.toLowerCase()))
 
   return (
@@ -152,7 +173,7 @@ export default function StudentsView() {
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Prénom</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Email</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Test</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Jury</TableCell>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Accès</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
                   </TableRow>
                 </TableHead>
@@ -184,12 +205,12 @@ export default function StudentsView() {
                         )}
                       </TableCell>
                       <TableCell sx={{ py: 1.5 }}>{s.email}</TableCell>
+                      <TableCell sx={{ py: 1.5 }}>{s.isTest ? 'Oui' : 'Non'}</TableCell>
                       <TableCell sx={{ py: 1.5 }}>
-                        {editingId !== s.id && (
-                          <Select size="small" value={s.assignedJury || ''} onChange={(e) => assignJury(s.id, e.target.value)} sx={{ minWidth: 140 }}>
-                            <MenuItem value="">(aucun)</MenuItem>
-                            {juries.map(j => <MenuItem key={j} value={j}>{j}</MenuItem>)}
-                          </Select>
+                        {isAdmin ? (
+                          <Button size="small" variant="outlined" onClick={() => handleGeneratePassword(s)} sx={{ textTransform: 'none' }}>Générer mot de passe</Button>
+                        ) : (
+                          <Typography sx={{ color: 'text.secondary' }}>—</Typography>
                         )}
                       </TableCell>
                       <TableCell sx={{ py: 1.5 }}>
@@ -201,6 +222,7 @@ export default function StudentsView() {
                         ) : (
                           <Box sx={{ display: 'flex', gap: 0.5 }}>
                             <Button size="small" variant="text" onClick={() => startEditing(s)}>Éditer</Button>
+                            <Button size="small" variant="text" onClick={() => toggleTest(s)} sx={{ textTransform: 'none' }}>{s.isTest ? 'Retirer test' : 'Marquer test'}</Button>
                             {isAdmin && (
                               <Button size="small" variant="text" onClick={() => navigate(`/admin/student/${s.id}/results`)} sx={{ textTransform: 'none' }}>Résultats</Button>
                             )}
@@ -224,6 +246,20 @@ export default function StudentsView() {
         <DialogActions>
           <Button onClick={() => setAddOpen(false)}>Annuler</Button>
           <Button variant="contained" onClick={handleCreateStudent}>Ajouter</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)}>
+        <DialogTitle>Mot de passe généré</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: 420 }}>
+          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Utilisateur: {generatedFor || '—'}</Typography>
+          <TextField label="Mot de passe" value={generatedPassword || ''} fullWidth InputProps={{ readOnly: true }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => {
+            if (generatedPassword && navigator && navigator.clipboard) navigator.clipboard.writeText(generatedPassword)
+          }}>Copier</Button>
+          <Button onClick={() => setPasswordDialogOpen(false)}>Fermer</Button>
         </DialogActions>
       </Dialog>
     </Box>

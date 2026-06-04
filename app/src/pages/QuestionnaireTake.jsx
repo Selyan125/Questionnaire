@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Box, Typography, Button, Paper } from '@mui/material'
+import { Box, Typography, Button, Paper, Alert } from '@mui/material'
 import { useParams, useNavigate } from 'react-router-dom'
 import { getQuestionnaire } from '../api/questionnaires.js'
 import QuestionnairePage from './QuestionnairePage.jsx'
@@ -12,6 +12,7 @@ export default function QuestionnaireTake(){
   const [error, setError] = useState(null)
   const [questionnaire, setQuestionnaire] = useState(null)
   const [started, setStarted] = useState(false)
+  const [validationError, setValidationError] = useState(null)
 
   useEffect(() => {
     let mounted = true
@@ -29,9 +30,52 @@ export default function QuestionnaireTake(){
     return () => { mounted = false }
   }, [id])
 
-  if (loading) return <Box sx={{ p: 3 }}><Typography>Chargement...</Typography></Box>
-  if (error) return <Box sx={{ p: 3 }}><Typography color="error">{error}</Typography></Box>
-  if (!questionnaire) return <Box sx={{ p: 3 }}><Typography>Questionnaire introuvable</Typography></Box>
+  function validateAnswers() {
+    const rawAns = localStorage.getItem(`answers_${id}`)
+    const answers = rawAns ? JSON.parse(rawAns) : {}
+    
+    // Collect all questions from all categories
+    const allQuestions = []
+    if (questionnaire && Array.isArray(questionnaire.categories)) {
+      for (const cat of questionnaire.categories) {
+        if (Array.isArray(cat.questions)) {
+          allQuestions.push(...cat.questions)
+        }
+      }
+    }
+
+    // Check if each question has at least one answer
+    const unansweredQuestions = []
+    for (const q of allQuestions) {
+      const answer = answers[q.id]
+      const emptyArray = Array.isArray(answer) && answer.length === 0
+      const emptyObject = answer && typeof answer === 'object' && !Array.isArray(answer) && Object.keys(answer).length === 0
+
+      if (answer === null || answer === undefined || answer === '' || emptyArray || emptyObject) {
+        unansweredQuestions.push(q.title || `Question ${q.id}`)
+      }
+    }
+
+    if (unansweredQuestions.length > 0) {
+      setValidationError(`Les questions suivantes doivent être répondues : ${unansweredQuestions.join(', ')}`)
+      return false
+    }
+
+    return true
+  }
+
+  function handleTerminateClick() {
+    if (validateAnswers()) {
+      setValidationError(null)
+      console.log('Terminate button clicked, navigating to:', `/questionnaire/${id}/done`);
+      navigate(`/questionnaire/${id}/done`);
+      setTimeout(() => window.location.reload(), 100);
+    }
+  }
+
+  if (loading) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography>Chargement...</Typography></Box>
+  if (error) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography color="error">{error}</Typography></Box>
+  if (!questionnaire) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography>Questionnaire introuvable</Typography></Box>
 
   // Start screen: centered flat card
   if (!started) {
@@ -49,9 +93,15 @@ export default function QuestionnaireTake(){
     )
   }
 
-  // Once started, reuse the unified QuestionnairePage wrapper in readOnly mode for students/teachers
   return (
     <Box sx={{ minHeight: '100vh' }}>
+      {validationError && (
+        <Box sx={{ position: 'fixed', top: 20, left: 20, right: 20, zIndex: 1300 }}>
+          <Alert severity="error" onClose={() => setValidationError(null)} sx={{ borderRadius: 2 }}>
+            {validationError}
+          </Alert>
+        </Box>
+      )}
       <QuestionnairePage 
         questionnaireId={id} 
         readOnly
@@ -59,12 +109,7 @@ export default function QuestionnaireTake(){
         rightActions={
           <Button 
             variant="text"
-            onClick={() => {
-              console.log('Terminate button clicked, navigating to:', `/questionnaire/${id}/done`);
-              navigate(`/questionnaire/${id}/done`);
-              // Refresh the page after navigation to ensure the page reloads properly
-              setTimeout(() => window.location.reload(), 100);
-            }} 
+            onClick={handleTerminateClick}
             sx={{ textTransform: 'none', borderRadius: 3 }}
             title="Terminer le questionnaire"
           >

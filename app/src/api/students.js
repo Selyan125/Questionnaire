@@ -86,3 +86,7 @@ export function updateStudent(studentId, data) {
     json: data,
   })
 }
+
+export function generateStudentPassword(studentId) {
+  return apiJson(`/api/students/${studentId}/password`, { method: 'POST' })
+}

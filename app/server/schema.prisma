@@ -49,6 +49,7 @@ model Student {
 model Questionnaire {
   id               Int                @id @default(autoincrement())
   title            String
+  date             DateTime           @default(now())
   openForStudents  Boolean            @default(false)
   gradingMode      String             @default("points")
   maxScore         Float              @default(20)
@@ -60,6 +61,8 @@ model Questionnaire {
 
   juryMembers QuestionnaireJuryMember[]
   students    QuestionnaireStudentMember[]
+  juryGroups  String?
+  sessions    String?
 }
 
 model QuestionnaireJuryMember {

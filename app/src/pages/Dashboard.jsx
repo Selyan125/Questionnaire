@@ -111,11 +111,22 @@ export default function Dashboard() {
       const imported = await importQuestionnaire(payload)
       const missingTeachers = imported.missingTeachers || []
       const missingStudents = imported.missingStudents || []
-      const missing = [
-        ...missingTeachers.map(email => `enseignant manquant: ${email}`),
-        ...missingStudents.map(email => `étudiant manquant: ${email}`),
-      ]
-      setImportMessage(missing.length ? `Questionnaire importé. ${missing.join(', ')}` : 'Questionnaire importé.')
+      const createdTeachers = imported.createdTeachers || []
+      const createdStudents = imported.createdStudents || []
+
+      const messages = []
+      if (createdTeachers.length) {
+        messages.push(`enseignants créés: ${createdTeachers.map(t => `${t.email} (${t.password})`).join(', ')}`)
+      }
+      if (createdStudents.length) {
+        messages.push(`étudiants créés: ${createdStudents.map(s => `${s.email} (${s.password})`).join(', ')}`)
+      }
+      if (missingTeachers.length || missingStudents.length) {
+        messages.push(...missingTeachers.map(email => `enseignant manquant: ${email}`))
+        messages.push(...missingStudents.map(email => `étudiant manquant: ${email}`))
+      }
+
+      setImportMessage(messages.length ? `Questionnaire importé. ${messages.join(' | ')}` : 'Questionnaire importé.')
       await loadDashboard()
       const id = imported.id || imported.questionnaireId
       if (id) navigate(`/admin/question-manager/${id}`)
@@ -332,7 +343,9 @@ export default function Dashboard() {
                       </Grid>
                     ))
                   ) : (
-                    <Grid item xs={12}><Typography sx={{ color: '#666' }}>Aucun questionnaire trouvé</Typography></Grid>
+          <Box sx={{ minHeight: 400, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Typography sx={{ color: '#666' }}>Aucun questionnaire trouvé</Typography>
+          </Box>
                   )}
                 </Grid>
               </Box>

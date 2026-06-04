@@ -29,3 +29,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Admin scripts
+**/create-admin-temp.js
+**/update-admin-temp.js
+**/create-admin.js

@@ -53,7 +53,11 @@ export function addCategory(questionnaireId, { title }) {
 
 export function submitQuestionnaire(questionnaireId, payload) {
   // single canonical submission endpoint (no fallbacks for security)
-  return apiJson('/api/submissions', { method: 'POST', json: payload })
+  return apiJson('/api/submissions', {
+    method: 'POST',
+    json: payload,
+    skipAuthRedirect: true,
+  })
 }
 
 export function getQuestionnaireResults(questionnaireId) {

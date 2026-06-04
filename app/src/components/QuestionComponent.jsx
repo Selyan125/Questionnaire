@@ -26,6 +26,34 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { apiJson } from '../api/http.js'
 import { updateQuestionTitle, deleteQuestion as deleteQuestionApi, addElement as addQuestionElement, updateElement, deleteElement as deleteElementApi } from '../api/questions.js'
 
+function getElementKey(el, idx) {
+    if (el && el.id !== undefined && el.id !== null && el.id !== '') {
+        return String(el.id)
+    }
+    return `idx-${idx}`
+}
+
+function normalizeExternalAnswer(answer, elements) {
+    if (Array.isArray(answer)) {
+        return answer.map(item => {
+            const raw = String(item)
+            const match = elements.find((el, idx) => {
+                const key = getElementKey(el, idx)
+                return key === raw || String(idx) === raw
+            })
+            return match ? getElementKey(match, elements.indexOf(match)) : item
+        })
+    }
+    if (typeof answer === 'string') {
+        const match = elements.find((el, idx) => {
+            const key = getElementKey(el, idx)
+            return key === answer || String(idx) === answer
+        })
+        return match ? getElementKey(match, elements.indexOf(match)) : answer
+    }
+    return answer
+}
+
 function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerChange, externalAnswer }) {
     const [editing, setEditing] = useState(false);
     const [question, setQuestion] = useState(data || {});
@@ -48,24 +76,19 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         });
         setQuestion(nextQuestion);
         setElements(nextElements);
-        const qKey = `ans_${(data && data.id) || index}`;
-        setAnswers(prev => ({ ...prev, [qKey]: externalAnswer !== undefined ? externalAnswer : null }));
-    }, [data, index]);
-
-    // apply externalAnswer changes
-    useEffect(() => {
-        const qKey = `ans_${(data && data.id) || index}`;
-        if (externalAnswer !== undefined) {
-            setAnswers(prev => ({ ...prev, [qKey]: externalAnswer }));
-        }
-    }, [externalAnswer, data, index]);
+        const qId = data?.id || index;
+        const qKey = `ans_q${qId}`;
+        const normalizedAnswer = externalAnswer !== undefined ? normalizeExternalAnswer(externalAnswer, nextElements) : null;
+        setAnswers({ [qKey]: normalizedAnswer });
+    }, [data, index, externalAnswer]);
 
     // propagate answers up when they change
     useEffect(() => {
         if (typeof onAnswerChange !== 'function') return
-        const qKey = `ans_${(data && data.id) || index}`
+        const qId = data?.id || index
+        const qKey = `ans_q${qId}`
         if (answers && Object.prototype.hasOwnProperty.call(answers, qKey)) {
-          try { onAnswerChange((data && data.id) || index, answers[qKey]) } catch (e) { /* ignore */ }
+          try { onAnswerChange(qId, answers[qKey]) } catch (e) { /* ignore */ }
         }
     }, [answers, data, index, onAnswerChange]);
 
@@ -112,22 +135,11 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
     }
 
     async function saveElement(elId, payload) {
-        if (readOnly) return false;
-        if (!elId || String(elId).startsWith('tmp-')) {
-            setElements(els => els.map(el => el.id === elId ? { ...el, ...payload } : el));
-            setQuestion(q => ({ ...q, elements: (q.elements || []).map(el => el.id === elId ? { ...el, ...payload } : el) }));
-            return false;
-        }
-        try {
-            await updateElement(elId, payload);
-            setElements(els => els.map(el => el.id === elId ? { ...el, ...payload } : el));
-            setQuestion(q => ({ ...q, elements: (q.elements || []).map(el => el.id === elId ? { ...el, ...payload } : el) }));
-            if (onRefresh) onRefresh();
-            return true;
-        } catch (e) {
-            console.error('saveElement failed', e);
-            return false;
-        }
+        if (readOnly) return;
+        const isTmp = !elId || String(elId).startsWith('tmp-');
+        const apply = els => els.map(el => el.id === elId ? { ...el, ...payload } : el);
+        setElements(apply); setQuestion(q => ({ ...q, elements: apply(q.elements || []) }));
+        if (!isTmp) try { await updateElement(elId, payload); onRefresh?.(); } catch {}
     }
 
     async function deleteQuestion() {
@@ -197,25 +209,62 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         };
 
         setCustomElement({ ...nextElement, evaluatingType, evaluatingValue });
-        await saveElement(nextElement.id, payload);
+
+if (patch.type === 'radio' || patch.type === 'checkbox') {
+    const newEls = elements.map(el => ({
+        ...el,
+        ...(el.id === nextElement.id ? payload : {}),
+        type: el.type === 'text' ? 'text' : patch.type
+    }));
+
+    setElements(newEls);
+    setQuestion(q => ({ ...q, elements: newEls }));
+
+    await Promise.all(
+        newEls.map(el =>
+            el.id && !String(el.id).startsWith('tmp-')
+                ? updateElement(
+                    el.id,
+                    el.id === nextElement.id
+                        ? payload
+                        : { type: el.type }
+                  ).catch(() => null)
+                : null
+        )
+    );
+} else {
+    await saveElement(nextElement.id, payload);
+}
     }
 
     function renderElement(el, idx) {
         const isLast = idx === elements.length - 1;
-        const qKey = `ans_${question && question.id || index}`;
+        const qId = data?.id || index;
+        const qKey = `ans_q${qId}`;
         const qAns = answers[qKey];
+        const elId = getElementKey(el, idx);
+        const hasTextElements = elements && elements.some(e => e.type === 'text');
+        const isTextAnswer = hasTextElements && typeof qAns === 'string' && qAns.trim().length > 0 && !elements.some((other, otherIdx) => other.type !== 'text' && getElementKey(other, otherIdx) === qAns);
+        const textValue = isTextAnswer ? qAns : '';
+        const hasTextContent = isTextAnswer;
 
         if ((el && el.type) === 'checkbox') {
-            const checked = Array.isArray(qAns) ? qAns.includes(idx) : false;
+            const checked = Array.isArray(qAns) ? qAns.includes(elId) : false;
             return (
                 <FormControlLabel
                     key={el.id || idx}
-                    control={<Checkbox checked={checked} onChange={(event) => {
+                    control={<Checkbox 
+                        checked={checked} 
+                        disabled={hasTextContent}
+                        onChange={(event) => {
                         setAnswers(prev => {
+                            if (hasTextContent) return prev;
+
                             const arr = Array.isArray(prev[qKey]) ? [...prev[qKey]] : [];
-                            if (event.target.checked) arr.push(idx);
-                            else {
-                                const i = arr.indexOf(idx);
+                            if (event.target.checked) {
+                                if (!arr.includes(elId)) arr.push(elId);
+                            } else {
+                                const i = arr.indexOf(elId);
                                 if (i >= 0) arr.splice(i, 1);
                             }
                             return { ...prev, [qKey]: arr };
@@ -231,7 +280,7 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
             return (
                 <Box key={el.id || idx} sx={{ width: '100%', mt: el.type === 'text' ? 0.55 : 0, }}>
                     <InputBase
-                        value={qAns || ''}
+                        value={textValue}
                         onChange={(event) => setAnswers(prev => ({ ...prev, [qKey]: event.target.value }))}
                         placeholder={el.title}
                         sx={{ width: '100%', px: 1, py: 0.5, bgcolor: 'transparent', borderRadius: 1, border: '1px solid rgba(0,0,0,0.10)' }}
@@ -243,8 +292,17 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         return (
             <FormControlLabel
                 key={el.id || idx}
-                value={String(idx)}
-                control={<Radio checked={qAns === String(idx)} onChange={() => setAnswers(prev => ({ ...prev, [qKey]: String(idx) }))} sx={{ '& .MuiSvgIcon-root': { fontSize: 21 } }} />}
+                value={elId}
+                control={<Radio 
+                    checked={!hasTextContent && qAns === elId} 
+                    disabled={hasTextContent}
+                    onChange={() => {
+                        if (!hasTextContent) {
+                            setAnswers(prev => ({ ...prev, [qKey]: elId }));
+                        }
+                    }} 
+                    sx={{ '& .MuiSvgIcon-root': { fontSize: 21 } }} 
+                />}
                 label={el.title}
                 sx={{ '& .MuiFormControlLabel-label': { fontSize: '0.95rem' }, mb: isLast ? 2 : 0 }}
             />
@@ -539,9 +597,12 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
                     size="small"
                     type="number"
                     disabled={noteValueDisabled}
-                    value={noteValueDisabled ? '' : Number(customElement?.evaluatingValue || 0)}
-                    onChange={(event) => updateCustomElement({ evaluatingValue: Number(event.target.value) })}
-                    inputProps={{ step: noteType === 3 ? 0.1 : 0.5 }}
+                    value={noteValueDisabled ? '' : customElement?.evaluatingValue ?? 0}
+                    onChange={(event) => {
+                        const raw = event.target.value;
+                        updateCustomElement({ evaluatingValue: raw === '' ? 0 : parseFloat(raw) });
+                    }}
+                    inputProps={{ step: 0.1 }}
                     fullWidth
                 />
             </Popover>

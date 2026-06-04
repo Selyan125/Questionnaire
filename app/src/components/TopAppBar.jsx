@@ -1,20 +1,79 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { AppBar, Box, Button, IconButton, Link, Paper, Toolbar, Typography, Popover, TextField } from "@mui/material";
+import { LocalizationProvider, StaticDateTimePicker } from '@mui/x-date-pickers';
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs';
+import dayjs from 'dayjs';
 import AddIcon from '@mui/icons-material/Add';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 
-function TopAppBar({ pages, selectedPage, onSelectPage, onAddCategory, onRenamePage, title, onTitleChange, leftActions, centerActions, rightActions, hideDashboardLink = false }) {
+function TopAppBar({ pages, selectedPage, onSelectPage, onAddCategory, onRenamePage, title, onTitleChange, date, onDateChange, leftActions, centerActions, rightActions, hideDashboardLink = false }) {
     const [editAnchorEl, setEditAnchorEl] = useState(null);
     const [editIndex, setEditIndex] = useState(null);
     const [editValue, setEditValue] = useState('');
+    const [anchorEl, setAnchorEl] = useState(null);
+    const [dateInputValue, setDateInputValue] = useState(null);
+    const [openTo, setOpenTo] = useState('day');
     const timerRef = useRef(null);
     const longPressTriggeredRef = useRef(false);
 
     useEffect(() => {
         return () => { if (timerRef.current) clearTimeout(timerRef.current) }
     }, []);
+
+    useEffect(() => {
+        if (date === undefined || date === null) {
+            setDateInputValue(null);
+            return;
+        }
+        const parsed = dayjs(date);
+        setDateInputValue(parsed.isValid() ? parsed : null);
+    }, [date]);
+
+    function formatDate(value) {
+        if (!value) return '';
+        const parsed = new Date(value);
+        if (Number.isNaN(parsed.getTime())) return '';
+        return parsed.toLocaleString('fr-FR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+        });
+    }
+
+    function handleDateInputChange(newValue) {
+        setDateInputValue(newValue);
+    }
+
+    function toggleDateTimeView() {
+        setOpenTo((current) => (current === 'day' ? 'hours' : 'day'));
+    }
+
+    function openDatePopover(e) {
+        setAnchorEl(e.currentTarget);
+    }
+
+    function closeDatePopover() {
+        setAnchorEl(null);
+    }
+
+    function saveDatePopover() {
+        if (typeof onDateChange === 'function') {
+            const v = dateInputValue;
+            if (!v) {
+                // nothing
+            } else if (v.toISOString) {
+                onDateChange(v.toISOString());
+            } else {
+                const parsed = new Date(v);
+                if (!Number.isNaN(parsed.getTime())) onDateChange(parsed.toISOString());
+            }
+        }
+        closeDatePopover();
+    }
 
     function openEdit(anchorEl, index) {
         setEditAnchorEl(anchorEl);
@@ -66,33 +125,74 @@ function TopAppBar({ pages, selectedPage, onSelectPage, onAddCategory, onRenameP
             >
                 <Box sx={{ gridColumn: 1, display: 'flex', alignItems: 'center', gap: 0.5, minWidth: 0 }}>
                     {leftActions || null}
-                    <Box
-                        component="div"
-                        contentEditable={!!onTitleChange}
-                        suppressContentEditableWarning
-                        role={onTitleChange ? 'textbox' : undefined}
-                        onBlur={onTitleChange ? (event) => onTitleChange(event.target.innerText) : undefined}
-                        onKeyDown={onTitleChange ? (event) => { if (event.key === 'Enter') { event.preventDefault(); event.target.blur(); } } : undefined}
-                        onPaste={onTitleChange ? (event) => {
-                            event.preventDefault();
-                            const text = (event.clipboardData || window.clipboardData).getData('text');
-                            document.execCommand ? document.execCommand('insertText', false, text) : (event.target.innerText += text);
-                        } : undefined}
+                     <Box
                         sx={{
-                            fontWeight: 500,
-                            fontSize: "1.25rem",
-                            outline: 'none',
-                            width: { xs: 140, sm: 260, md: 320 },
-                            maxWidth: { xs: 140, sm: 260, md: 320 },
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            cursor: onTitleChange ? 'text' : 'default',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            minWidth: 0
                         }}
-                    >
-                        {title || 'Questionnaire'}
+                        >
+                        <Box
+                            component="div"
+                            contentEditable={!!onTitleChange}
+                            suppressContentEditableWarning
+                            role={onTitleChange ? 'textbox' : undefined}
+                            onBlur={onTitleChange ? (event) => onTitleChange(event.target.innerText) : undefined}
+                            onKeyDown={onTitleChange ? (event) => { if (event.key === 'Enter') { event.preventDefault(); event.target.blur(); } } : undefined}
+                            onPaste={onTitleChange ? (event) => {
+                                event.preventDefault();
+                                const text = (event.clipboardData || window.clipboardData).getData('text');
+                                document.execCommand ? document.execCommand('insertText', false, text) : (event.target.innerText += text);
+                            } : undefined}
+                            sx={{
+                                fontWeight: 500,
+                                fontSize: "1.25rem",
+                                outline: 'none',
+                                width: { xs: 140, sm: 260, md: 320 },
+                                maxWidth: { xs: 140, sm: 260, md: 320 },
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                                cursor: onTitleChange ? 'text' : 'default',
+                            }}
+                        >
+                            {title || 'Questionnaire'}
+                        </Box>
+                        <Typography
+                            sx={{
+                                color: 'text.secondary',
+                                fontSize: 14,
+                                cursor: onDateChange ? 'pointer' : 'default',
+                            }}
+                            onClick={onDateChange ? (e) => openDatePopover(e) : undefined}
+                        >
+                            {formatDate(date) || 'Date non définie'}
+                        </Typography>
                     </Box>
                 </Box>
+                <Popover
+                    open={!!anchorEl}
+                    anchorEl={anchorEl}
+                    onClose={() => closeDatePopover()}
+                    anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+                    transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+                    PaperProps={{ sx: { p: 2, minWidth: 320 } }}
+                >
+                    <LocalizationProvider dateAdapter={AdapterDayjs}>
+                        <StaticDateTimePicker
+                            displayStaticWrapperAs="desktop"
+                            value={dateInputValue}
+                            onChange={handleDateInputChange}
+                            openTo={openTo}
+                            ampm={false}
+                            slots={{ actionBar: () => null }}
+                        />
+                    </LocalizationProvider>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1, mt: 1 }}>
+                        <Button onClick={() => toggleDateTimeView()} variant="outlined" sx={{ minWidth: 120 }}>Afficher {openTo === 'day' ? 'l’heure' : 'la date'}</Button>
+                        <Button onClick={() => saveDatePopover()} variant="text" sx={{ mx: 2, boxShadow: 'none' }}>Enregistrer</Button>
+                    </Box>
+                </Popover>
 
                 <Box sx={{ gridColumn: 2, justifySelf: 'center', display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
                     <Paper

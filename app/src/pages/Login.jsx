@@ -14,7 +14,7 @@ export default function Login() {
     e.preventDefault()
     setError(null)
     try {
-      const data = await login({ email, password, role })
+      const data = await login({ email: email.trim(), password, role })
       if (!data || !data.token) {
         setError('Réponse invalide du serveur')
         return

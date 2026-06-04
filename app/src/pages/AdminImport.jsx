@@ -57,7 +57,6 @@ export default function AdminImport() {
       <Paper sx={{ p: 3, maxWidth: 900 }}>
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h6">Import CSV - étudiants / enseignants</Typography>
-          <Button variant="contained" onClick={handleCreateQuestionnaire}>Créer un questionnaire</Button>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Format attendu: email,nom,prenom (ou juste email) — une ligne par utilisateur.
