@@ -1296,7 +1296,7 @@ app.post('/api/submissions', authenticateToken, async (req, res) => {
         questionnaireId: Number(questionnaireId),
         studentId,
         answers: JSON.stringify(answers || []),
-        submittedAt: submissionTime.toISOString()
+        submittedAt: submissionTime
       }
     })
 
