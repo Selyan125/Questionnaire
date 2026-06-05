@@ -4,7 +4,6 @@ RUN apk add --no-cache bash openssl
 
 WORKDIR /app
 
-# copier seulement le backend (contexte = server)
 COPY . .
 
 RUN npm install
@@ -15,4 +14,4 @@ ENV NODE_ENV=production
 
 EXPOSE 4000
 
-CMD ["npm", "start"]
+CMD ["sh", "-c", "npx prisma db push --skip-generate && npm start"]
