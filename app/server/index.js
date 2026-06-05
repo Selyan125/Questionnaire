@@ -326,7 +326,7 @@ app.get('/api/questionnaires', async (req, res) => {
   res.json(await mergeQuestionnaireSettings(questionnaires))
 })
 
-app.get('/api/questionnaires/:id', async (req, res) => {
+app.get('/api/questionnaires/:id', authenticateToken, async (req, res) => {
   const id = Number(req.params.id)
   const questionnaire = await prisma.questionnaire.findUnique({
     where: { id },
@@ -342,8 +342,22 @@ app.get('/api/questionnaires/:id', async (req, res) => {
   })
   if (!questionnaire) return res.status(404).json({ error: 'Not found' })
   const withSettings = await mergeQuestionnaireSettings(questionnaire)
-  const members = await getQuestionnaireMembers(id)
-  res.json({ ...withSettings, juryMembers: members.teachers, assignedStudents: members.students })
+
+  const { role, id: meId } = req.user || {}
+  if (role === 'teacher') {
+    const members = await getQuestionnaireMembers(id)
+    return res.json({ ...withSettings, juryMembers: members.teachers, assignedStudents: members.students })
+  }
+
+  if (role === 'student') {
+    const allowed = withSettings.openForStudents || await prisma.questionnaireStudentMember.findFirst({
+      where: { questionnaireId: id, studentId: Number(meId) }
+    })
+    if (!allowed) return res.status(403).json({ error: 'Not authorized to access this questionnaire' })
+    return res.json(withSettings)
+  }
+
+  res.status(403).json({ error: 'Forbidden' })
 })
 
 app.post('/api/questionnaires', authenticateToken, async (req, res) => {
@@ -1018,6 +1032,40 @@ app.put('/api/students/:id', authenticateToken, async (req, res) => {
   }
 })
 
+async function generateRandomPassword() {
+  return crypto.randomBytes(9).toString('base64').replace(/\+/g, 'A').replace(/\//g, 'B').slice(0, 12)
+}
+
+app.post('/api/teachers', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { email, password, admin = false } = req.body
+    if (!email) return res.status(400).json({ error: 'email is required' })
+    const normalizedEmail = normalizeEmail(email)
+    const plain = typeof password === 'string' && password.trim() ? password : await generateRandomPassword()
+    const hashed = await argon2.hash(plain)
+    const created = await prisma.teacher.create({ data: { email: normalizedEmail, password: hashed, admin: !!admin } })
+    const { password: _p, ...rest } = created
+    return res.status(201).json({ ...rest, password: plain })
+  } catch (err) {
+    console.error('Could not create teacher:', err.message)
+    res.status(500).json({ error: 'Could not create teacher' })
+  }
+})
+
+app.post('/api/teachers/:id/password', authenticateToken, requireAdmin, async (req, res) => {
+  try {
+    const { password } = req.body
+    const id = Number(req.params.id)
+    const plain = typeof password === 'string' && password.trim() ? password : await generateRandomPassword()
+    const hashed = await argon2.hash(plain)
+    await prisma.teacher.update({ where: { id }, data: { password: hashed } })
+    res.json({ password: plain })
+  } catch (err) {
+    console.error('Could not reset teacher password:', err.message)
+    res.status(500).json({ error: 'Could not reset teacher password' })
+  }
+})
+
 app.get('/api/teachers', authenticateToken, async (req, res) => {
   try {
     const teachers = await prisma.teacher.findMany({ select: { id: true, email: true, jury: true, admin: true } })
@@ -1193,10 +1241,24 @@ app.post('/api/admin/import', authenticateToken, async (req, res) => {
 // Submissions / Results
 app.post('/api/submissions', authenticateToken, async (req, res) => {
   try {
-    const { questionnaireId, answers, submittedAt } = req.body
+    const { questionnaireId, answers, submittedAt, studentId: bodyStudentId } = req.body
     if (!questionnaireId) return res.status(400).json({ error: 'questionnaireId is required' })
 
-    const studentId = req.user && req.user.role === 'student' ? Number(req.user.id) : null
+    let studentId = null
+    if (req.user && req.user.role === 'student') {
+      studentId = Number(req.user.id)
+      if (bodyStudentId && Number(bodyStudentId) !== studentId) {
+        return res.status(400).json({ error: 'Student ID does not match authenticated user' })
+      }
+    } else if (req.user && req.user.role === 'teacher') {
+      studentId = bodyStudentId ? Number(bodyStudentId) : null
+      if (!studentId) {
+        return res.status(400).json({ error: 'studentId is required when saving a student submission as teacher' })
+      }
+      const student = await prisma.student.findUnique({ where: { id: studentId } })
+      if (!student) return res.status(400).json({ error: 'Invalid studentId' })
+    }
+
     console.log('Submission attempt:', {
       questionnaireId,
       studentId,
@@ -1207,17 +1269,34 @@ app.post('/api/submissions', authenticateToken, async (req, res) => {
     })
     
     if (!studentId) {
-      console.warn('No valid student ID:', { role: req.user?.role, id: req.user?.id })
+      console.warn('No valid student ID:', { role: req.user?.role, id: req.user?.id, bodyStudentId })
       return res.status(400).json({ error: 'Not authenticated as student' })
     }
 
+    const questionnaire = await prisma.questionnaire.findUnique({
+      where: { id: Number(questionnaireId) },
+      select: { openForStudents: true }
+    })
+    if (!questionnaire) return res.status(404).json({ error: 'Questionnaire not found' })
+
+    if (req.user.role === 'student') {
+      const allowed = questionnaire.openForStudents || await prisma.questionnaireStudentMember.findFirst({
+        where: { questionnaireId: Number(questionnaireId), studentId }
+      })
+      if (!allowed) return res.status(403).json({ error: 'Not authorized to submit this questionnaire' })
+    }
+
     const parsedSubmittedAt = parseSubmissionDate(submittedAt)
+    let submissionTime = parsedSubmittedAt instanceof Date ? parsedSubmittedAt : new Date()
+    if (Number.isNaN(submissionTime.getTime())) {
+      submissionTime = new Date()
+    }
     const submission = await prisma.submission.create({
       data: {
         questionnaireId: Number(questionnaireId),
         studentId,
         answers: JSON.stringify(answers || []),
-        submittedAt: parsedSubmittedAt ? parsedSubmittedAt.toISOString() : new Date().toISOString()
+        submittedAt: submissionTime.toISOString()
       }
     })
 
