@@ -21,7 +21,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.${NAME}-api.rule=Host(`api.${NAME}.jrcan.dev`)
-      - traefik.http.routers.${NAME}.tls.certresolver=myresolver
+      - traefik.http.routers.${NAME}-api.tls.certresolver=myresolver
       - traefik.http.routers.${NAME}-api.entrypoints=websecure
       - traefik.http.routers.${NAME}-api.tls=true
       - traefik.http.services.${NAME}-api.loadbalancer.server.port=4000
