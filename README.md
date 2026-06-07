@@ -4,6 +4,9 @@
 
 Ce site permet de créer et faire passer des questionnaires à des enseignants et étudiants.
 
+> [!WARNING] 
+> Ce site n'est **pas** stable. Les fonctionnalités ainsi que la sécurité sont encore en développement, il ne doit **pas** être utilisé en production.
+
 ## Un questionnaire
 
 Un questionnaire a jusqu'à 8 questions par catégorie et 6 sous questions par question.
