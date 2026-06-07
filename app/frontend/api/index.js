@@ -7,3 +7,4 @@ export { listStudents, listJuries as listStudentJuriesApi, listTeachers as listS
 export { updateQuestionTitle, deleteQuestion, addElement, updateElement, deleteElement } from './questions.js'
 export { importUsers } from './admin.js'
 export { addQuestionToCategory, deleteCategory } from './categories.js'
+export { createSession, getQuestionnaireSessions, getSessionDetails, updateSession, deleteSession, addJuryToSession, removeJuryFromSession, addStudentToSession, removeStudentFromSession, updateSessionStudentJury } from './sessions.js'

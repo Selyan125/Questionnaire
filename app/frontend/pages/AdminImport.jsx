@@ -59,7 +59,7 @@ export default function AdminImport() {
           <Typography variant="h6">Import CSV - étudiants / enseignants</Typography>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Format attendu: email,nom,prenom (ou juste email) — une ligne par utilisateur.
+          Format: email,nom,prenom | Les mots de passes sont générés automatiquement et doivent être récupérés 
         </Typography>
 
         <TextField

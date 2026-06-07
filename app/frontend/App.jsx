@@ -12,7 +12,9 @@ import QuestionnaireDone from './pages/QuestionnaireDone.jsx'
 import QuestionnaireResults from './pages/QuestionnaireResults.jsx'
 import StudentResults from './pages/StudentResults.jsx'
 import ResultDetail from './pages/ResultDetail.jsx'
+import TeacherSessions from './pages/TeacherSessions.jsx'
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
+import ServerStatus from './pages/ServerStatus.jsx'
 
 function App() {
     return (
@@ -20,6 +22,7 @@ function App() {
             <Routes>
                 <Route path="/" element={<Home />} />
                 <Route path="/login" element={<Login />} />
+                <Route path="/server-status" element={<ServerStatus />} />
                 <Route path="/dashboard" element={
                     <ProtectedRoute>
                         <Dashboard />
@@ -27,12 +30,12 @@ function App() {
                 } />
                 <Route path="/admin/question-manager" element={
                     <ProtectedRoute>
-                        <QuestionManagerEditor />
+                        <QuestionManagerEditor showStudentsSidebar={true} />
                     </ProtectedRoute>
                 } />
                 <Route path="/admin/question-manager/:id" element={
                     <ProtectedRoute>
-                        <QuestionManagerEditor />
+                        <QuestionManagerEditor showStudentsSidebar={true} />
                     </ProtectedRoute>
                 } />
                 <Route path="/questionnaire/:id" element={
@@ -68,6 +71,11 @@ function App() {
                 <Route path="/admin/result/:id" element={
                     <ProtectedRoute>
                         <ResultDetail />
+                    </ProtectedRoute>
+                } />
+                <Route path="/teacher-sessions" element={
+                    <ProtectedRoute>
+                        <TeacherSessions />
                     </ProtectedRoute>
                 } />
             </Routes>

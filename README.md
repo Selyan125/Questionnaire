@@ -1,16 +1,38 @@
-# React + Vite
+# Questionnaire (Notes Software)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Principe
 
-Currently, two official plugins are available:
+Ce site permet de créer et faire passer des questionnaires à des enseignants et étudiants.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Un questionnaire
 
-## React Compiler
+Un questionnaire a jusqu'à 8 questions par catégorie et 6 sous questions par question.
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Sous questions
 
-## Expanding the ESLint configuration
+Les sous questions ont : 
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+- Une note si besoin (Modes : ajout, soustraction, coefficient et plafond catégorie*)
+- Un ordre personnalisé (L'ordre peut changer la note finale)
+- Un champ de réponse si besoin (non noté directement)
+
+### Sessions 
+
+Une session est un questionnaire à une date spécifique. 
+Une session a son propre jury et étudiants associés.
+
+### Jury
+
+Un jury est un groupe d'enseignants (et autres) qui servent à noter l'étudiant.
+
+### Questionnaire Enseignant et Étudiant
+
+Le questionnaire pour un enseignant disposera de plus d'options au niveau de l'interface telles que :
+
+- Changer de session facilement (si l'enseignant en fait partie)
+- Voir la note en temps réel
+- Voir tous les étudiants associés là ou l'enseignant l'est.
+
+Le questionnaire d'un étudiant est limité. L'étudiant ne peut que répondre et valider le questionnaire avant d'être connecté.
+
+*Le 'plafond catégorie' signifie que la note finale de la catégorie (ou questionnaire) sera limité à une note spécifiée ou sera inférieur. C'est une option qui **pénalise** l'étudiant.

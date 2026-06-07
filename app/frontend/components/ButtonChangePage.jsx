@@ -7,16 +7,22 @@ export default function ButtonChangePage({ isBack, onClick }) {
         <IconButton
             onClick={onClick}
             sx={{
-                width: 80,
-                height: 80,
+                width: 48,
+                height: 48,
                 backgroundColor: '#FFFFFF',
                 borderRadius: '50%',
+                zIndex: 5,
+                boxShadow: '0 4px 14px rgba(0,0,0,0.08)',
+                border: '1px solid rgba(0,0,0,0.05)',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
                 '&:hover': {
-                    backgroundColor: '#E0E0E0',
+                    backgroundColor: '#f5f5f5',
+                    boxShadow: '0 6px 16px rgba(0,0,0,0.15)',
+                    transform: 'scale(1.08)',
                 },
 
                 '& .MuiSvgIcon-root': {
-                    fontSize: 38,
+                    fontSize: 24,
                     color: '#4A4A4A',
                 },
             }}

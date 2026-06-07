@@ -15,6 +15,9 @@ model Jury {
   name     String
   teachers Teacher[] @relation("JuryTeachers")
   students Student[] @relation("JuryStudents")
+  
+  sessionJuries SessionJury[] @relation("JurySessionJury")
+  sessionStudents SessionStudent[] @relation("JurySessionStudent")
 
   @@map("jury")
 }
@@ -29,6 +32,7 @@ model Teacher {
   admin    Boolean @default(false)
 
   questionnaireJuries QuestionnaireJuryMember[]
+  sessionJuries SessionJury[]
 }
 
 model Student {
@@ -44,6 +48,7 @@ model Student {
   isTest       Boolean @default(false)
 
   questionnaireStudents QuestionnaireStudentMember[]
+  sessionStudents SessionStudent[]
 }
 
 model Questionnaire {
@@ -62,7 +67,7 @@ model Questionnaire {
   juryMembers QuestionnaireJuryMember[]
   students    QuestionnaireStudentMember[]
   juryGroups  String?
-  sessions    String?
+  sessions    Session[]
 }
 
 model QuestionnaireJuryMember {
@@ -83,6 +88,54 @@ model QuestionnaireStudentMember {
   student       Student       @relation(fields: [studentId], references: [id], onDelete: Cascade)
 
   @@id([questionnaireId, studentId])
+}
+
+model Session {
+  id              Int       @id @default(autoincrement())
+  name            String
+  date            DateTime?
+  active          Boolean   @default(false)
+  questionnaireId Int
+  questionnaire   Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
+  
+  juries          SessionJury[]
+  students        SessionStudent[]
+  
+  @@index([questionnaireId])
+}
+
+model SessionJury {
+  id              Int    @id @default(autoincrement())
+  sessionId       Int
+  session         Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  juryId          Int
+  jury            Jury   @relation("JurySessionJury", fields: [juryId], references: [id], onDelete: Cascade)
+  
+  teacherId       Int
+  teacher         Teacher @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  
+  @@unique([sessionId, teacherId])
+  @@index([sessionId])
+  @@index([juryId])
+  @@index([teacherId])
+}
+
+model SessionStudent {
+  id              Int    @id @default(autoincrement())
+  sessionId       Int
+  session         Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  studentId       Int
+  student         Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  
+  juryId          Int
+  jury            Jury   @relation("JurySessionStudent", fields: [juryId], references: [id], onDelete: Cascade)
+  
+  @@unique([sessionId, studentId])
+  @@index([sessionId])
+  @@index([studentId])
+  @@index([juryId])
 }
 
 model QuestionCategory {

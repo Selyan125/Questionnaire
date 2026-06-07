@@ -11,7 +11,6 @@ export default function QuestionnaireTake(){
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [questionnaire, setQuestionnaire] = useState(null)
-  const [started, setStarted] = useState(false)
   const [validationError, setValidationError] = useState(null)
 
   useEffect(() => {
@@ -76,22 +75,6 @@ export default function QuestionnaireTake(){
   if (loading) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography>Chargement...</Typography></Box>
   if (error) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography color="error">{error}</Typography></Box>
   if (!questionnaire) return <Box sx={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}><Typography>Questionnaire introuvable</Typography></Box>
-
-  // Start screen: centered flat card
-  if (!started) {
-    return (
-      <Box sx={{ minHeight: '80vh', display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3, bgcolor: 'background.default' }}>
-        <Paper elevation={0} sx={{ width: { xs: '92%', sm: 640 }, borderRadius: 2, p: 4, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'background.paper' }}>
-          <Typography variant="h5" sx={{ fontWeight: 700, mb: 1 }}>{questionnaire.title || 'Questionnaire'}</Typography>
-          <Typography sx={{ color: 'text.secondary', mb: 3 }}>{questionnaire.description || ''}</Typography>
-          <Box sx={{ display: 'flex', gap: 1, justifyContent: 'center' }}>
-            <Button variant="contained" onClick={() => setStarted(true)} sx={{ textTransform: 'none' }}>Démarrer</Button>
-            <Button variant="text" onClick={() => navigate('/login')} sx={{ textTransform: 'none' }}>Quitter</Button>
-          </Box>
-        </Paper>
-      </Box>
-    )
-  }
 
   return (
     <Box sx={{ minHeight: '100vh' }}>

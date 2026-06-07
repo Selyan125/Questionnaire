@@ -17,7 +17,7 @@ export default function StudentLanding(){
         <Paper sx={{ p: 4, elevation: 0, border: '1px solid rgba(0,0,0,0.06)', borderRadius: 3 }}>
           {assignedId ? (
             <>
-              <Typography sx={{ mb: 2 }}>Un questionnaire vous a été assigné.</Typography>
+              <Typography sx={{ mb: 2 }}>Un questionnaire vous a été assigné. Bon courage !</Typography>
               <Button variant="contained" onClick={() => navigate(`/questionnaire/${assignedId}/take`)}>Démarrer le questionnaire</Button>
             </>
           ) : (

@@ -20,11 +20,21 @@ import { listQuestionnaires, createQuestionnaire, deleteQuestionnaire as deleteQ
 import { apiFetch } from '../api/http.js'
 
 export default function Dashboard() {
+  const authUser = JSON.parse(localStorage.getItem('authUser') || '{}')
+  const isAdmin = authUser?.admin === true
+  
+  if (!isAdmin) {
+    return (
+      <Box sx={{ p: 3, minHeight: '100vh' }}>
+        <Typography color="error">Accès refusé. Seuls les administrateurs peuvent accéder au tableau de bord.</Typography>
+        <Button variant="outlined" onClick={() => window.location.href = '/teacher-sessions'} sx={{ mt: 2 }}>Accéder à mes sessions</Button>
+      </Box>
+    )
+  }
   const [selectedMenu, setSelectedMenu] = useState(0);
   const [stats, setStats] = useState(null)
   const [loadingStats, setLoadingStats] = useState(true)
   const [errorStats, setErrorStats] = useState(null)
-  const [isAdmin, setIsAdmin] = useState(false)
   const [user, setUser] = useState(null)
   const navigate = useNavigate()
   const [questionnaires, setQuestionnaires] = useState([])
@@ -50,9 +60,9 @@ export default function Dashboard() {
       // determine admin
       if (user && tJson && Array.isArray(tJson)) {
         const me = tJson.find(t => t.id === user.id)
-        setIsAdmin(!!(me && me.admin))
+        //setIsAdmin(!!(me && me.admin))
       } else {
-        setIsAdmin(false)
+        //setIsAdmin(false)
       }
 
       // load questionnaires list
@@ -64,7 +74,7 @@ export default function Dashboard() {
       }
 
     } catch (err) {
-      setErrorStats(err.message)
+      navigate('/server-status', { state: { error: err && err.message ? err.message : 'Erreur du chargement du tableau de bord' } })
     } finally {
       setLoadingStats(false)
     }
@@ -154,6 +164,13 @@ export default function Dashboard() {
     navigate('/login')
   }
 
+  const roleLabel = user ? (
+    user.role === 'teacher' ? 'Enseignant' :
+    user.role === 'student' ? 'Étudiant' :
+    user.role === 'admin' ? 'Administrateur' :
+    user.role
+  ) : ''
+
   return (
     <Box sx={{ p: 2, height: '100vh', boxSizing: 'border-box', overflow: 'hidden' }}>
       <Typography sx={{ fontSize: 24, fontWeight: 600, mb: 2 }}>Tableau de bord</Typography>
@@ -181,7 +198,7 @@ export default function Dashboard() {
             <Avatar sx={{ bgcolor: '#5b53d6' }}>{user && user.email ? user.email.charAt(0).toUpperCase() : 'U'}</Avatar>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontWeight: 700, fontSize: 14, lineHeight: 1.1, wordBreak: 'break-word', overflowWrap: 'anywhere' }}>{user ? user.email : 'Utilisateur'}</Typography>
-              <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{isAdmin ? 'Administrateur' : (user ? user.role : '')}</Typography>
+              <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{isAdmin ? 'Administrateur' : roleLabel}</Typography>
               <Box sx={{ mt: 1 }}>
                 <Button size="small" onClick={logout} variant="outlined" sx={{ borderRadius: 2, textTransform: 'none', px: 1.5 }}>Déconnexion</Button>
               </Box>
@@ -311,8 +328,7 @@ export default function Dashboard() {
                           </Box>
                           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                             <Button size="small" onClick={() => navigate(`/admin/question-manager/${q.id}`)}>Ouvrir</Button>
-                            <Button size="small" variant="text" onClick={() => navigate(`/questionnaire/${q.id}/take`)} sx={{ textTransform: 'none' }}>Démarrer (Étudiant)</Button>
-                            <Button size="small" variant="text" onClick={() => navigate(`/questionnaire/${q.id}`)} sx={{ textTransform: 'none' }}>Ouvrir (Enseignant)</Button>
+                            
                             {isAdmin && (
                               <>
                               

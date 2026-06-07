@@ -36,11 +36,13 @@ import CoPresentIcon from '@mui/icons-material/CoPresent'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopAppBar from '../components/TopAppBar.jsx'
 import QuestionComponent from '../components/QuestionComponent.jsx'
-import { getQuestionnaire, updateQuestionnaire, updateQuestionnaireJury, deleteQuestionnaire as deleteQuestionnaireApi, addCategory as addCategoryApi } from '../api/questionnaires.js'
+import SessionsManagementDialog from '../components/SessionsManagementDialog.jsx'
+import { getQuestionnaire, updateQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi, addCategory as addCategoryApi } from '../api/questionnaires.js'
 import { getStudentResults } from '../api/students.js'
 import { addQuestionToCategory as addQuestionToCategoryApi, deleteCategory as deleteCategoryApi, updateCategory as updateCategoryApi } from '../api/categories.js'
 import { listStudents } from '../api/students.js'
-import { listTeachers } from '../api/teachers.js'
+import { listTeachers, listJuries, createJuryMaster } from '../api/teachers.js'
+import { createSession, getQuestionnaireSessions, updateSession, deleteSession, addJuryToSession, removeJuryFromSession, addStudentToSession, removeStudentFromSession, updateSessionStudentJury } from '../api/sessions.js'
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="left" ref={ref} {...props} />
@@ -51,6 +53,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const { id: idParam } = useParams()
   const effectiveQuestionnaireId = questionnaireId ?? idParam
   const canEdit = !readOnly
+  const isAdmin = JSON.parse(localStorage.getItem('authUser') || '{}')?.admin === true
 
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -60,10 +63,9 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const [previewMode, setPreviewMode] = useState(null)
   const [availableTeachers, setAvailableTeachers] = useState([])
   const [availableStudents, setAvailableStudents] = useState([])
-  const [juryDialogOpen, setJuryDialogOpen] = useState(false)
-  const [juryGroups, setJuryGroups] = useState([])
+  const [availableJuries, setAvailableJuries] = useState([])
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false)
-  const [sessions, setSessions] = useState([])
+  const [sessionDetails, setSessionDetails] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
   const [dragOverTarget, setDragOverTarget] = useState(null)
 
@@ -80,26 +82,16 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
-  function buildSessionsFromQuestionnaire() {
-    const raw = questionnaire?.sessions
-    const parsed = typeof raw === 'string' ? safeParseJSON(raw) : Array.isArray(raw) ? raw : []
-    if (!Array.isArray(parsed)) return []
-    return parsed.map((session, index) => ({
-      id: session && session.id ? session.id : `session-${index + 1}`,
-      name: session && session.name ? session.name : `Session ${index + 1}`,
-      studentIds: Array.isArray(session && session.studentIds) ? session.studentIds : [],
-    }))
-  }
-
   // students sidebar state: controlled by parent via propShowStudentsSidebar
   const [students, setStudents] = useState([])
   const [selectedStudentId, setSelectedStudentId] = useState(null)
-  const showStudentsSidebar = viewerMode === 'teacher' && !!propShowStudentsSidebar
-  const sessionsList = buildSessionsFromQuestionnaire()
+  const showStudentsSidebar = viewerMode === 'teacher' && propShowStudentsSidebar !== false
+  const sessionsList = sessionDetails
   const selectedSession = sessionsList.find(s => String(s.id) === String(selectedSessionId))
-  const visibleStudents = selectedSession && selectedSession.studentIds && selectedSession.studentIds.length > 0
-    ? (questionnaire?.assignedStudents || []).filter(s => selectedSession.studentIds.map(String).includes(String(s.id)))
-    : (questionnaire?.assignedStudents || [])
+  const allStudents = availableStudents && availableStudents.length ? availableStudents : students
+  const visibleStudents = selectedSession && selectedSession.students && selectedSession.students.length > 0
+    ? selectedSession.students
+    : allStudents
 
   useEffect(() => {
     if (!selectedSessionId && sessionsList.length) {
@@ -123,21 +115,43 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [selectedStudentId])
 
   const loadMembershipOptions = useCallback(async () => {
-    if (!canEdit) return
+    if (viewerMode !== 'teacher') return
     try {
-      const [teachersJson, studentsJson] = await Promise.all([listTeachers(), listStudents()])
+      const results = await Promise.allSettled([listTeachers(), listStudents(), listJuries()])
+      
+      const teachersJson = results[0].status === 'fulfilled' ? results[0].value : []
+      const studentsJson = results[1].status === 'fulfilled' ? results[1].value : []
+      const juriesJson = results[2].status === 'fulfilled' ? results[2].value : []
+
       setAvailableTeachers(Array.isArray(teachersJson) ? teachersJson : [])
       setAvailableStudents(Array.isArray(studentsJson) ? studentsJson : [])
+      setAvailableJuries(Array.isArray(juriesJson) ? juriesJson : [])
     } catch (e) {
       console.error('Failed to load questionnaire membership options', e)
     }
-  }, [canEdit])
+  }, [viewerMode])
 
-    useEffect(() => {
+  const loadSessionsFromAPI = useCallback(async () => {
+    try {
+      const loadedSessions = await getQuestionnaireSessions(effectiveQuestionnaireId)
+      setSessionDetails(loadedSessions || [])
+    } catch (err) {
+      console.error('Could not load sessions:', err)
+      setSessionDetails([])
+    }
+  }, [effectiveQuestionnaireId])
+
+  useEffect(() => {
     if (settingsOpen) {
       loadMembershipOptions()
     }
   }, [settingsOpen, loadMembershipOptions])
+
+  useEffect(() => {
+    if (!effectiveQuestionnaireId) return
+    loadMembershipOptions()
+    loadSessionsFromAPI()
+  }, [effectiveQuestionnaireId, loadMembershipOptions, loadSessionsFromAPI])
 
   useEffect(() => {
     if (viewerMode !== 'teacher') {
@@ -300,8 +314,11 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   async function addQuestionToCategory(catId) {
     if (!canEdit) return
     if (!catId) return
-    const total = questionnaire && questionnaire.categories ? questionnaire.categories.reduce((s,c) => s + ((c.questions || []).length), 0) : 0
-    if (total >= 6) { console.warn('Limite de 6 questions générales atteinte'); return }
+    const limit = questionnaire?.questionsLimit || 6
+    const targetCat = questionnaire?.categories?.find(c => c.id === catId)
+    const count = targetCat?.questions?.length || 0
+
+    if (count >= limit) { console.warn(`Limite de ${limit} questions atteinte pour cette catégorie`); return }
     try {
       await addQuestionToCategoryApi(catId, { title: 'Nouvelle question' })
       await load()
@@ -336,147 +353,107 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
-  async function updateMembership(patch) {
-    if (!canEdit || !effectiveQuestionnaireId) return
-    const teacherIds = patch.teacherIds ?? (questionnaire?.juryMembers || []).map(t => t.id)
-    const studentIds = patch.studentIds ?? (questionnaire?.assignedStudents || []).map(s => s.id)
-    setQuestionnaire(q => ({
-      ...(q || {}),
-      juryMembers: availableTeachers.filter(t => teacherIds.map(String).includes(String(t.id))),
-      assignedStudents: availableStudents.filter(s => studentIds.map(String).includes(String(s.id))),
-    }))
-    try {
-      const updated = await updateQuestionnaireJury(effectiveQuestionnaireId, { teacherIds, studentIds })
-      setQuestionnaire(q => ({
-        ...(q || {}),
-        juryMembers: updated.teachers || [],
-        assignedStudents: updated.students || [],
-      }))
-    } catch (e) {
-      setError(e.message)
-      await load()
-    }
+  function formatSessionDate(value) {
+    if (!value) return null
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return null
+    return date.toLocaleDateString('fr-FR')
   }
 
-  function buildJuryGroupsFromQuestionnaire() {
-    const rawGroups = questionnaire?.juryGroups
-    let groups = []
-
-    if (Array.isArray(rawGroups)) {
-      groups = rawGroups
-    } else if (typeof rawGroups === 'string' && rawGroups.trim()) {
-      try {
-        groups = JSON.parse(rawGroups)
-      } catch {
-        groups = []
-      }
-    }
-
-    if (Array.isArray(groups) && groups.length) {
-      return groups.map((group, index) => ({
-        id: group.id || `group-${Date.now()}-${index}`,
-        name: group.name || `Groupe ${index + 1}`,
-        teacherIds: Array.isArray(group.teacherIds) ? group.teacherIds : [],
-        studentIds: Array.isArray(group.studentIds) ? group.studentIds : [],
-      }))
-    }
-
-    return [
-      {
-        id: `group-${Date.now()}`,
-        name: 'Jury principal',
-        teacherIds: (questionnaire?.juryMembers || []).map(t => t.id),
-        studentIds: (questionnaire?.assignedStudents || []).map(s => s.id),
-      },
-    ]
-  }
-
-  async function saveJuryGroups() {
-    if (!canEdit || !effectiveQuestionnaireId) return
-    const teacherIds = Array.from(new Set(juryGroups.flatMap(g => g.teacherIds))).filter(Boolean)
-    const studentIds = Array.from(new Set(juryGroups.flatMap(g => g.studentIds))).filter(Boolean)
-    const groupsPayload = juryGroups.map(({ id, name, teacherIds, studentIds }) => ({
-      id,
-      name: name || 'Groupe',
-      teacherIds: Array.isArray(teacherIds) ? teacherIds : [],
-      studentIds: Array.isArray(studentIds) ? studentIds : [],
-    }))
-
-    try {
-      await Promise.all([
-        updateQuestionnaire(effectiveQuestionnaireId, { juryGroups: groupsPayload }),
-        updateQuestionnaireJury(effectiveQuestionnaireId, { teacherIds, studentIds }),
-      ])
-      setQuestionnaire(q => ({
-        ...(q || {}),
-        juryGroups: groupsPayload,
-        juryMembers: availableTeachers.filter(t => teacherIds.map(String).includes(String(t.id))),
-        assignedStudents: availableStudents.filter(s => studentIds.map(String).includes(String(s.id))),
-      }))
-      setJuryDialogOpen(false)
-    } catch (e) {
-      setError(e.message)
-    }
-  }
-
-  function openJuryDialog() {
-    setJuryGroups(buildJuryGroupsFromQuestionnaire())
-    setJuryDialogOpen(true)
-  }
-
-  function openSessionsDialog() {
-    setSessions(buildSessionsFromQuestionnaire())
+  async function openSessionsDialog() {
+    await loadMembershipOptions()
+    await loadSessionsFromAPI()
     setSessionsDialogOpen(true)
   }
 
-  async function saveSessions() {
-    const sessionsPayload = sessions.map(session => ({
-      id: session.id,
-      name: session.name,
-      studentIds: Array.isArray(session.studentIds) ? session.studentIds : [],
-    }))
+  async function addJuryMasterUI(name) {
     try {
-      const updated = await updateQuestionnaire(effectiveQuestionnaireId, { sessions: sessionsPayload })
-      setQuestionnaire(updated)
-      setSessionsDialogOpen(false)
+      await createJuryMaster(name)
+      await loadMembershipOptions()
     } catch (err) {
-      console.error('Could not save sessions', err)
+      console.error('Could not create master jury:', err)
     }
   }
 
-  function addJuryGroup() {
-    setJuryGroups(prev => [
-      ...prev,
-      {
-        id: `group-${Date.now()}-${prev.length + 1}`,
-        name: `Groupe ${prev.length + 1}`,
-        teacherIds: [],
-        studentIds: [],
-      },
-    ])
+  async function addSession() {
+    try {
+      const newSession = await createSession(effectiveQuestionnaireId, { name: `Session ${sessionDetails.length + 1}`, date: null })
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not create session:', err)
+    }
   }
 
-  function updateJuryGroup(groupId, patch) {
-    setJuryGroups(prev => prev.map(g => g.id === groupId ? { ...g, ...patch } : g))
+  async function updateSessionDetails(sessionId, name, date, active) {
+    try {
+      const current = sessionDetails.find(s => String(s.id) === String(sessionId));
+      if (active !== undefined) {
+        setSessionDetails(prev => prev.map(s =>
+          String(s.id) === String(sessionId) ? { ...s, active: active } : s
+        ));
+      }
+
+      const payload = {
+        name: name !== undefined ? name : current?.name,
+        date: date !== undefined ? date : current?.date,
+        active: active !== undefined ? active : current?.active
+      };
+      const updated = await updateSession(sessionId, payload)
+      
+      if (updated) {
+        setSessionDetails(prev => prev.map(s => 
+          String(s.id) === String(sessionId) ? { ...s, ...updated } : s
+        ));
+      }
+    } catch (err) {
+      console.error('Could not update session:', err)
+      await loadSessionsFromAPI()
+    }
   }
 
-  function removeJuryGroup(groupId) {
-    setJuryGroups(prev => prev.filter(g => g.id !== groupId))
+  async function removeSessionDetails(sessionId) {
+    try {
+      await deleteSession(sessionId)
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not delete session:', err)
+    }
   }
 
-  function addParticipantToGroup(groupId, type, id) {
-    setJuryGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g
-      const key = type === 'teacher' ? 'teacherIds' : 'studentIds'
-      const ids = g[key] || []
-      if (ids.map(String).includes(String(id))) return g
-      return { ...g, [key]: [...ids, id] }
-    }))
+  async function addJuryToSessionUI(sessionId, juryId, teacherId) {
+    try {
+      await addJuryToSession(sessionId, { juryId, teacherId })
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not add jury:', err)
+    }
   }
 
-  function removeParticipantFromGroup(groupId, type, id) {
-    const key = type === 'teacher' ? 'teacherIds' : 'studentIds'
-    setJuryGroups(prev => prev.map(g => g.id === groupId ? { ...g, [key]: g[key].filter(item => String(item) !== String(id)) } : g))
+  async function removeJuryFromSessionUI(sessionJuryId) {
+    try {
+      await removeJuryFromSession(sessionJuryId)
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not remove jury:', err)
+    }
+  }
+
+  async function addStudentToSessionUI(sessionId, studentId, juryId) {
+    try {
+      await addStudentToSession(sessionId, { studentId, juryId })
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not add student:', err)
+    }
+  }
+
+  async function removeStudentFromSessionUI(sessionStudentId) {
+    try {
+      await removeStudentFromSession(sessionStudentId)
+      await loadSessionsFromAPI()
+    } catch (err) {
+      console.error('Could not remove student:', err)
+    }
   }
 
   async function deleteCurrentCategory() {
@@ -556,20 +533,16 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     return cats.find(c => c.id === selectedCategoryId) || null
   }, [questionnaire, selectedCategoryId])
 
-  const totalQuestions = useMemo(() => {
-    return (questionnaire && Array.isArray(questionnaire.categories))
-      ? questionnaire.categories.reduce((s, c) => s + ((c && c.questions) ? c.questions.length : 0), 0)
-      : 0
-  }, [questionnaire])
-
-  const canAddQuestion = canEdit && totalQuestions < 6
-  const addSlotIndex = Math.min(flat.length, 5)
+  const questionsLimit = questionnaire?.questionsLimit || 6
+  const gridCols = questionsLimit <= 4 ? questionsLimit : Math.ceil(questionsLimit / 2)
+  const canAddQuestion = canEdit && flat.length < questionsLimit
+  const addSlotIndex = Math.min(flat.length, questionsLimit - 1)
 
   const slots = useMemo(() => {
     const out = []
-    for (let i = 0; i < 6; i++) out.push(flat[i] || null)
+    for (let i = 0; i < questionsLimit; i++) out.push(flat[i] || null)
     return out
-  }, [flat])
+  }, [flat, questionsLimit])
 
   // Calculate score for teacher view
   const studentScore = useMemo(() => {
@@ -719,96 +692,72 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           ) : null)}
           hideDashboardLink={readOnly || !!rightActions}
         />
-        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'stretch', gap: readOnly && viewerMode === 'teacher' && showStudentsSidebar ? 2 : 1, flex: 1, pt: '76px', minHeight: 0 }}>
-          {/* When readOnly, show students list on the left like the design */}
-          {readOnly && viewerMode === 'teacher' && showStudentsSidebar && (
-            <Box sx={{ width: { xs: 80, sm: 240 }, flex: '0 0 auto', px: 1, pr: 2 }}>
-              <Paper sx={{ p: 2, borderRadius: 2, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.06)', height: '100%' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: 16 }}>Sessions</Typography>
-                  <Button size="small" variant="outlined" onClick={openSessionsDialog}>
-                    Gérer
-                  </Button>
-                </Box>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1, mb: 2, maxHeight: 220, overflowY: 'auto' }}>
-                  {sessionsList && sessionsList.length ? sessionsList.map(session => (
-                    <Button
-                      key={session.id}
-                      fullWidth
-                      variant={String(selectedSessionId) === String(session.id) ? 'contained' : 'outlined'}
-                      onClick={() => setSelectedSessionId(session.id)}
-                      sx={{ textTransform: 'none', justifyContent: 'flex-start', borderRadius: 4.5, p: 1.5, fontSize: 13 }}
+        <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, pt: '76px', minHeight: 0, position: 'relative' }}>
+          {viewerMode === 'teacher' && showStudentsSidebar && (
+            <Box sx={{ width: { xs: 80, sm: 300 }, flex: '0 0 auto', px: 2, py: 3, position: 'relative', zIndex: 1100, pointerEvents: 'auto' }}>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
+                  <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: 'text.primary' }}>Planning</Typography>
+                {isAdmin && (
+                    <Button 
+                      size="small" 
+                      variant="text" 
+                      onClick={openSessionsDialog} 
+                      sx={{ borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, textTransform: 'none' }}
                     >
-                      {session.name}
+                      Gérer
                     </Button>
-                  )) : (
-                    <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>Aucune session</Typography>
                   )}
                 </Box>
-                <Typography sx={{ fontWeight: 700, mb: 1, fontSize: 14 }}>Étudiants</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, maxHeight: 'calc(100vh - 320px)', overflowY: 'auto' }}>
-                  {visibleStudents && visibleStudents.length ? visibleStudents.map(s => (
-                    <Box key={s.id || s._id} sx={{ px: 0.5 }}>
-                      <Button
-                        fullWidth
-                        variant={selectedStudentId && String(selectedStudentId) === String(s.id || s._id) ? 'contained' : 'outlined'}
-                        onClick={() => setSelectedStudentId(s.id || s._id)}
-                        sx={{
-                          textTransform: 'none',
-                          justifyContent: 'flex-start',
-                          borderRadius: 4.5,
-                          p: 1.75,
-                          fontSize: 13,
-                          textOverflow: 'ellipsis',
-                          overflow: 'hidden',
-                          transition: 'all 0.2s ease',
-                        }}
-                      >
-                        {(() => {
-                          const last = s.nom || s.lastName || s.name || '';
-                          const first = s.prenom || s.firstName || '';
-                          const fullname = [last, first].filter(Boolean).join(' ').trim();
-                          if (fullname) return fullname;
-                          if (s.email) return s.email;
-                          return 'Étudiant';
-                        })()}
-                      </Button>
-                    </Box>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, flex: 1, overflowY: 'auto' }}>
+                  {sessionsList && sessionsList.length ? sessionsList.map(session => (
+                    <Paper
+                      key={session.id}
+                      elevation={0}
+                      sx={{ 
+                        p: 2, 
+                        borderRadius: '16px', 
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        border: '1px solid rgba(0,0,0,0.06)',
+                        bgcolor: '#fff',
+                        opacity: session.active ? 1 : 0.8,
+                        transition: 'all 0.2s ease',
+                      }}
+                    >
+                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', overflow: 'hidden' }}>
+                        <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: session.active ? 'text.primary' : 'text.secondary', noWrap: true }}>{session.name}</Typography>
+                        {session.date && (
+                          <Typography sx={{ fontSize: '0.7rem', opacity: 0.6 }}>{formatSessionDate(session.date)}</Typography>
+                        )}
+                      </Box>
+                      {isAdmin && (
+                        <Tooltip title={session.active ? "Session ouverte" : "Session fermée"}>
+                          <Switch 
+                            size="small" 
+                            checked={!!session.active} 
+                            onChange={(e, checked) => {
+                              e.stopPropagation();
+                              updateSessionDetails(session.id, session.name, session.date, checked);
+                            }}
+                            sx={{ ml: 1 }}
+                          />
+                        </Tooltip>
+                      )}
+                    </Paper>
                   )) : (
-                    <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>Aucun étudiant</Typography>
+                    <Typography sx={{ color: 'text.secondary', fontSize: 13, textAlign: 'center', mt: 4 }}>Aucune session prévue</Typography>
                   )}
                 </Box>
               </Paper>
             </Box>
           )}
 
-          {/* Center - questions grid, full width */}
-          <Box sx={{ flex: 1, overflow: 'hidden', pr: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {error && (
-              <Box sx={{ px: 2, pt: 1 }}>
-                <Typography color="error" sx={{ fontSize: 13 }}>{error}</Typography>
-              </Box>
-            )}
-
-            {/* 2 lignes x 3 colonnes (6 slots) */}
-            <Box
-              sx={{
-                p: 0.75,
-                px: { xs: 2, sm: 12 },
-                width: '100%',
-                maxWidth: 1400,
-                mx: 'auto',
-                flex: 1,
-                minHeight: 0,
-                display: 'grid',
-                gap: 2,
-                gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
-                gridTemplateRows: { sm: 'repeat(2, minmax(0, 1fr))' },
-                alignItems: 'stretch',
-                position: 'relative',
-              }}
-            >
-              {/* Side arrows centered in the outer margins */}
+          {/* Center - questions grid */}
+          <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Navigation Arrows - Fixed and Centered in margins */}
+            <Tooltip title="Catégorie précédente">
               <IconButton
                 size="small"
                 disabled={selectedPageIndex <= 0}
@@ -822,18 +771,23 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 }}
                 sx={{
                   position: 'fixed',
-                  left: '32px',
-                  top: 'calc(76px + (100vh - 76px) / 2)',
-                  transform: 'translate(0, -50%)',
+                  left: viewerMode === 'teacher' && showStudentsSidebar ? '340px' : '20px',
+                  top: '55%',
+                  transform: 'translateY(-50%)',
                   bgcolor: 'background.paper',
-                  border: '1px solid rgba(0,0,0,0.08)',
-                  zIndex: 1200,
-                  p: 2
+                  border: '1px solid rgba(0,0,0,0.12)',
+                  boxShadow: 'none',
+                  zIndex: 10, // Très bas pour passer sous les paramètres
+                  p: 2.5,
+                  '&:hover': { bgcolor: '#fff', transform: 'translateY(-50%) scale(1.1)' },
+                  '&.Mui-disabled': { opacity: 0.1 }
                 }}
               >
                 <ArrowBackIcon />
               </IconButton>
+            </Tooltip>
 
+            <Tooltip title="Catégorie suivante">
               <IconButton
                 size="small"
                 disabled={selectedPageIndex >= ((pages && pages.length ? pages.length : 1) - 1)}
@@ -847,17 +801,44 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 }}
                 sx={{
                   position: 'fixed',
-                  right: '32px',
-                  top: 'calc(76px + (100vh - 76px) / 2)',
-                  transform: 'translate(0, -50%)',
+                  right: '20px',
+                  top: '55%',
+                  transform: 'translateY(-50%)',
                   bgcolor: 'background.paper',
                   border: '1px solid rgba(0,0,0,0.08)',
-                  zIndex: 1200,
-                  p: 2
+                  boxShadow: 'none',
+                  zIndex: 10, // Très bas pour passer sous les paramètres
+                  p: 2.5,
+                  '&:hover': { bgcolor: '#fff', transform: 'translateY(-50%) scale(1.1)' },
+                  '&.Mui-disabled': { opacity: 0.1 }
                 }}
               >
                 <ArrowForwardIcon />
               </IconButton>
+            </Tooltip>
+
+            {error && (
+              <Box sx={{ px: 2, pt: 1 }}>
+                <Typography color="error" sx={{ fontSize: 13 }}>{error}</Typography>
+              </Box>
+            )}
+
+            {/* 2 lignes x 3 colonnes (6 slots) */}
+            <Box
+              sx={{
+                p: 0.75,
+                px: { xs: 2, sm: 15 }, // Marge de 120px pour laisser respirer les flèches
+                width: '100%',
+                flex: 1,
+                minHeight: 0,
+                display: 'grid',
+                gap: 2,
+                gridTemplateColumns: { xs: '1fr', sm: `repeat(${gridCols}, 1fr)` },
+                justifyContent: 'center',
+                alignItems: 'stretch',
+                position: 'relative',
+              }}
+            >
               {slots.map((p, i) => (
                 <Box key={p ? p.question.id : `slot-${i}`} sx={{ minHeight: 210, height: '100%', '& .MuiCard-root': { height: '100%' } }}>
                   {p ? (
@@ -1050,31 +1031,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               </Select>
             </FormControl>
 
-            <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.08)', bgcolor: 'background.paper' }}>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, mb: 1 }}>
-                <Box>
-                  <Typography sx={{ fontSize: 14, fontWeight: 600 }}>Groupes de jury</Typography>
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }}>Gérez les enseignants et étudiants par groupe</Typography>
-                </Box>
-                <Button size="small" variant="outlined" onClick={openJuryDialog} sx={{ borderRadius: 8, textTransform: 'none' }}>
-                  Gérer les groupes de jury
-                </Button>
-              </Box>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Enseignants</Typography>
-              <Typography sx={{ fontSize: 14, mb: 1 }}>
-                {questionnaire?.juryMembers?.length
-                  ? questionnaire.juryMembers.map(t => t.email).join(', ')
-                  : 'Aucun enseignant assigné'}
-              </Typography>
-              <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Étudiants</Typography>
-              <Typography sx={{ fontSize: 14 }}>
-                {questionnaire?.assignedStudents?.length
-                  ? questionnaire.assignedStudents.map(s => [s.nom, s.prenom].filter(Boolean).join(' ') || s.email).join(', ')
-                  : 'Aucun étudiant associé'}
-              </Typography>
-            </Paper>
-
-            <Divider />
 
             <FormControlLabel
               control={
@@ -1114,177 +1070,22 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           </Stack>
         </Box>
       </Drawer>
-      <Dialog
-        fullWidth
-        maxWidth="lg"
-        open={juryDialogOpen}
-        onClose={() => setJuryDialogOpen(false)}
-        PaperProps={{ sx: { borderRadius: 12, overflow: 'hidden' } }}
-      >
-        <DialogTitle sx={{ color: 'text.primary', bgcolor: 'background.default', borderBottom: '1px solid rgba(0,0,0,0.08)', py: 2 }}>
-          Gérer les groupes de jury
-        </DialogTitle>
-        <DialogContent dividers sx={{ bgcolor: 'background.default', p: 3 }}>
-          <Box sx={{ display: 'flex', gap: 2, minHeight: 520, alignItems: 'stretch', flexWrap: 'wrap' }}>
-            <Box sx={{ flex: 1.3, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 320, maxHeight: 520, overflowY: 'auto' }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
-                <Typography sx={{ fontWeight: 700 }}>Liste des groupes</Typography>
-                <Button size="small" variant="outlined" onClick={addJuryGroup} sx={{ borderRadius: 8, textTransform: 'none' }}>
-                  Ajouter un groupe
-                </Button>
-              </Box>
-              <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {juryGroups.map(group => (
-                  <Paper key={group.id} elevation={0} sx={{ p: 2, border: '1px solid rgba(0,0,0,0.12)', borderRadius: 2 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                      <TextField
-                        value={group.name}
-                        onChange={(event) => updateJuryGroup(group.id, { name: event.target.value })}
-                        label="Nom du groupe"
-                        size="small"
-                        fullWidth
-                      />
-                      <IconButton size="small" onClick={() => removeJuryGroup(group.id)}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </Box>
-                    <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1 }}>Enseignants</Typography>
-                    <Box
-                      onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`${group.id}-teacher`) }}
-                      onDragLeave={() => setDragOverTarget(null)}
-                      onDrop={(e) => {
-                        e.preventDefault(); setDragOverTarget(null)
-                        try {
-                          const payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
-                          if (payload.type === 'teacher' && payload.id) addParticipantToGroup(group.id, 'teacher', payload.id)
-                        } catch {}
-                      }}
-                      sx={{
-                        minHeight: 64,
-                        p: 1,
-                        borderRadius: 1,
-                        border: '1px dashed rgba(0,0,0,0.18)',
-                        bgcolor: dragOverTarget === `${group.id}-teacher` ? 'rgba(0,0,0,0.04)' : 'transparent',
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: 1,
-                        alignItems: 'center',
-                      }}
-                    >
-                      {group.teacherIds.length > 0 ? group.teacherIds.map((teacherId) => {
-                        const teacher = availableTeachers.find(t => String(t.id) === String(teacherId))
-                        if (!teacher) return null
-                        return (
-                          <Chip
-                            key={`teacher-${group.id}-${teacher.id}`}
-                            label={teacher.email}
-                            size="small"
-                            onDelete={() => removeParticipantFromGroup(group.id, 'teacher', teacher.id)}
-                            draggable
-                            onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'teacher', id: teacher.id }))}
-                          />
-                        )
-                      }) : (
-                        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Glissez des enseignants ici</Typography>
-                      )}
-                    </Box>
-                    <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: 1, mt: 2 }}>Étudiants</Typography>
-                    <Box
-                      onDragOver={(e) => { e.preventDefault(); setDragOverTarget(`${group.id}-student`) }}
-                      onDragLeave={() => setDragOverTarget(null)}
-                      onDrop={(e) => {
-                        e.preventDefault(); setDragOverTarget(null)
-                        try {
-                          const payload = JSON.parse(e.dataTransfer.getData('application/json') || '{}')
-                          if (payload.type === 'student' && payload.id) addParticipantToGroup(group.id, 'student', payload.id)
-                        } catch {}
-                      }}
-                      sx={{
-                        minHeight: 64,
-                        p: 1,
-                        borderRadius: 1,
-                        border: '1px dashed rgba(0,0,0,0.18)',
-                        bgcolor: dragOverTarget === `${group.id}-student` ? 'rgba(0,0,0,0.04)' : 'transparent',
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: 1,
-                        alignItems: 'center',
-                      }}
-                    >
-                      {group.studentIds.length > 0 ? group.studentIds.map((studentId) => {
-                        const student = availableStudents.find(s => String(s.id) === String(studentId))
-                        if (!student) return null
-                        const name = [student.nom, student.prenom].filter(Boolean).join(' ') || student.email
-                        return (
-                          <Chip
-                            key={`student-${group.id}-${student.id}`}
-                            label={name}
-                            size="small"
-                            onDelete={() => removeParticipantFromGroup(group.id, 'student', student.id)}
-                            draggable
-                            onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'student', id: student.id }))}
-                          />
-                        )
-                      }) : (
-                        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Glissez des étudiants ici</Typography>
-                      )}
-                    </Box>
-                  </Paper>
-                ))}
-              </Box>
-            </Box>
-            <Box sx={{ flex: 0.9, display: 'flex', flexDirection: 'column', gap: 2, minWidth: 280, maxHeight: 520, overflowY: 'auto' }}>
-              <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.12)' }}>
-                <Typography sx={{ fontWeight: 700, mb: 1 }}>Enseignants</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {availableTeachers.map((teacher) => {
-                    const assignedCount = juryGroups.filter(g => g.teacherIds.map(String).includes(String(teacher.id))).length
-                    return (
-                      <Box
-                        key={teacher.id}
-                        draggable
-                        onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'teacher', id: teacher.id }))}
-                        sx={{ p: 1, borderRadius: 1, bgcolor: 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}
-                      >
-                        <Typography sx={{ fontSize: 14 }}>{teacher.email}</Typography>
-                        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{assignedCount ? `${assignedCount} groupe${assignedCount > 1 ? 's' : ''}` : 'non assigné'}</Typography>
-                      </Box>
-                    )
-                  })}
-                </Box>
-              </Paper>
-              <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: '1px solid rgba(0,0,0,0.12)' }}>
-                <Typography sx={{ fontWeight: 700, mb: 1 }}>Étudiants</Typography>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                  {availableStudents.map((student) => {
-                    const assignedCount = juryGroups.filter(g => g.studentIds.map(String).includes(String(student.id))).length
-                    const name = [student.nom, student.prenom].filter(Boolean).join(' ') || student.email
-                    return (
-                      <Box
-                        key={student.id}
-                        draggable
-                        onDragStart={(e) => e.dataTransfer.setData('application/json', JSON.stringify({ type: 'student', id: student.id }))}
-                        sx={{ p: 1, borderRadius: 1, bgcolor: 'background.paper', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 1 }}
-                      >
-                        <Typography sx={{ fontSize: 14 }}>{name}</Typography>
-                        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{assignedCount ? `${assignedCount} groupe${assignedCount > 1 ? 's' : ''}` : 'non assigné'}</Typography>
-                      </Box>
-                    )
-                  })}
-                </Box>
-              </Paper>
-            </Box>
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2, gap: 1, bgcolor: 'background.default', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-          <Button variant="text" onClick={() => setJuryDialogOpen(false)} sx={{ borderRadius: 8, textTransform: 'none' }}>
-            Annuler
-          </Button>
-          <Button variant="outlined" onClick={saveJuryGroups} sx={{ borderRadius: 8, textTransform: 'none' }}>
-            Enregistrer
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <SessionsManagementDialog
+        open={sessionsDialogOpen}
+        onClose={() => setSessionsDialogOpen(false)}
+        sessions={sessionDetails}
+        availableTeachers={availableTeachers}
+        availableStudents={availableStudents}
+        availableJuries={availableJuries}
+        onAddSession={addSession}
+        onUpdateSession={updateSessionDetails}
+        onDeleteSession={removeSessionDetails}
+        onAddJury={addJuryToSessionUI}
+        onRemoveJury={removeJuryFromSessionUI}
+        onAddStudent={addStudentToSessionUI}
+        onRemoveStudent={removeStudentFromSessionUI}
+        onAddJuryMaster={addJuryMasterUI}
+      />
       <Dialog
         fullScreen
         open={!!previewMode}
@@ -1334,8 +1135,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   minHeight: 0,
                   display: 'grid',
                   gap: 2,
-                  gridTemplateColumns: { xs: '1fr', sm: 'repeat(3, minmax(0, 1fr))' },
-                  gridTemplateRows: { sm: 'repeat(2, minmax(0, 1fr))' },
+                  gridTemplateColumns: { xs: '1fr', sm: `repeat(${gridCols}, minmax(0, 1fr))` },
                   alignItems: 'stretch',
                   position: 'relative',
                 }}

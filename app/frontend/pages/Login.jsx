@@ -21,7 +21,16 @@ export default function Login() {
       }
       localStorage.setItem('authToken', data.token)
       localStorage.setItem('authUser', JSON.stringify(data.user || {}))
-      navigate('/dashboard')
+      
+      // Redirect based on role and admin status
+      const user = data.user || {}
+      if (user.role === 'student') {
+        navigate('/student')
+      } else if (user.role === 'teacher' && !user.admin) {
+        navigate('/teacher-sessions')
+      } else {
+        navigate('/dashboard')
+      }
     } catch (err) {
       const status = err && err.status
       const payload = err && err.data
@@ -41,8 +50,6 @@ export default function Login() {
       setError(err && err.message ? err.message : 'Erreur réseau')
     }
   }
-  // 2yYB1YTZ3XVCg745Uj4up7413lqtyI5huX136Q / admin@softwarenotes.local
-
 
   return (
     <Box

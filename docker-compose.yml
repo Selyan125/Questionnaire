@@ -2,13 +2,17 @@ services:
   backend:
     container_name: ${NAME}-api
     build:
-      context: ./app/server
+      context: ./app/backend
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: file:/app/dev.db
+      DATABASE_URL: file:/app/backend/dev.db
       JWT_SECRET: ${JWT_SECRET}
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+    volumes:
+      - ./app/backend/dev.db:/app/backend/dev.db
     ports:
       - "4000:4000"
     networks:
@@ -17,6 +21,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.${NAME}-api.rule=Host(`api.${NAME}.jrcan.dev`)
+      - traefik.http.routers.${NAME}.tls.certresolver=myresolver
       - traefik.http.routers.${NAME}-api.entrypoints=websecure
       - traefik.http.routers.${NAME}-api.tls=true
       - traefik.http.services.${NAME}-api.loadbalancer.server.port=4000
@@ -39,6 +44,7 @@ services:
     labels:
       - traefik.enable=true
       - traefik.http.routers.${NAME}.rule=Host(`${NAME}.jrcan.dev`)
+      - traefik.http.routers.${NAME}.tls.certresolver=myresolver 
       - traefik.http.routers.${NAME}.entrypoints=websecure
       - traefik.http.routers.${NAME}.tls=true
       - traefik.http.services.${NAME}.loadbalancer.server.port=5173
