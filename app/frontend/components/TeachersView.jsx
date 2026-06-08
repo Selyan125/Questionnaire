@@ -105,7 +105,7 @@ export default function TeachersView() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAddOpen(false)}>Annuler</Button>
-          <Button variant="contained" onClick={handleCreateTeacher}>Ajouter</Button>
+          <Button variant="text" onClick={handleCreateTeacher}>Ajouter</Button>
         </DialogActions>
       </Dialog>
 

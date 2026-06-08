@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react'
 import {
   Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
+  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment,
+  IconButton, Switch, Tooltip, Chip, FormControlLabel
 } from '@mui/material'
 import SearchIcon from '@mui/icons-material/Search'
 import AddIcon from '@mui/icons-material/Add'
+import EditIcon from '@mui/icons-material/Edit'
 import { listStudents, createStudent, updateStudent, generateStudentPassword } from '../api/students.js'
 import { listTeachers } from '../api/teachers.js'
 import { useNavigate } from 'react-router-dom'
@@ -134,7 +136,9 @@ export default function StudentsView() {
     }
   }
 
-  const filtered = students.filter(s => s.email.toLowerCase().includes(filter.toLowerCase()))
+  const filtered = students
+    .filter(s => s.email.toLowerCase().includes(filter.toLowerCase()))
+    .sort((a, b) => (b.isTest ? 1 : 0) - (a.isTest ? 1 : 0))
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
@@ -147,8 +151,8 @@ export default function StudentsView() {
             onChange={(e) => setFilter(e.target.value)}
             InputProps={{ startAdornment: (<InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>) }}
             sx={{ width: 220 }}
-          />
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Ajouter</Button>
+          /> 
+          <Button variant="text" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Ajouter</Button>
         </Box>
       </Box>
 
@@ -169,10 +173,10 @@ export default function StudentsView() {
               <Table size="medium" sx={{ minWidth: 0, width: '100%', '& .MuiTableCell-root': { py: 1.5 } }}>
                 <TableHead>
                   <TableRow>
+                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Test</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Nom</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Prénom</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Email</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Test</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Accès</TableCell>
                     <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
                   </TableRow>
@@ -180,6 +184,11 @@ export default function StudentsView() {
                 <TableBody>
                   {filtered.map(s => (
                     <TableRow key={s.id} hover>
+                      <TableCell sx={{ py: 1.5 }}>
+                        {s.isTest && (
+                          <Chip label="Test" size="small" color="secondary" variant="outlined" sx={{ fontSize: 10, fontWeight: 700 }} />
+                        )}
+                      </TableCell>
                       <TableCell sx={{ py: 1.5 }}>
                         {editingId === s.id ? (
                           <TextField
@@ -205,7 +214,6 @@ export default function StudentsView() {
                         )}
                       </TableCell>
                       <TableCell sx={{ py: 1.5 }}>{s.email}</TableCell>
-                      <TableCell sx={{ py: 1.5 }}>{s.isTest ? 'Oui' : 'Non'}</TableCell>
                       <TableCell sx={{ py: 1.5 }}>
                         {isAdmin ? (
                           <Button size="small" variant="outlined" onClick={() => handleGeneratePassword(s)} sx={{ textTransform: 'none' }}>Générer mot de passe</Button>
@@ -220,12 +228,19 @@ export default function StudentsView() {
                             <Button size="small" variant="text" onClick={cancelEditing}>Annuler</Button>
                           </Box>
                         ) : (
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <Button size="small" variant="text" onClick={() => startEditing(s)}>Éditer</Button>
-                            <Button size="small" variant="text" onClick={() => toggleTest(s)} sx={{ textTransform: 'none' }}>{s.isTest ? 'Retirer test' : 'Marquer test'}</Button>
+                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
+                            <Tooltip title="Éditer">
+                              <IconButton size="small" onClick={() => startEditing(s)}>
+                                <EditIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
                             {isAdmin && (
                               <Button size="small" variant="text" onClick={() => navigate(`/admin/student/${s.id}/results`)} sx={{ textTransform: 'none' }}>Résultats</Button>
                             )}
+                            <Box sx={{ flex: 1 }} />
+                            <Tooltip title={s.isTest ? "Retirer mode test" : "Marquer comme test"}>
+                              <Switch size="small" checked={!!s.isTest} onChange={() => toggleTest(s)} />
+                            </Tooltip>
                           </Box>
                         )}
                       </TableCell>
@@ -241,11 +256,18 @@ export default function StudentsView() {
       <Dialog open={addOpen} onClose={() => setAddOpen(false)}>
         <DialogTitle>Ajouter un étudiant</DialogTitle>
         <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: 420 }}>
+          <FormControlLabel
+            control={
+              <Switch checked={newIsTest} onChange={(e) => setNewIsTest(e.target.checked)} />
+            }
+            label="Marquer comme compte de test"
+            sx={{ mb: 1 }}
+          />
           <TextField label="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} fullWidth />
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAddOpen(false)}>Annuler</Button>
-          <Button variant="contained" onClick={handleCreateStudent}>Ajouter</Button>
+          <Button variant="text" onClick={handleCreateStudent}>Ajouter</Button>
         </DialogActions>
       </Dialog>
 

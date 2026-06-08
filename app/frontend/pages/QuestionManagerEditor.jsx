@@ -697,7 +697,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
             <Box sx={{ width: { xs: 80, sm: 300 }, flex: '0 0 auto', px: 2, py: 3, position: 'relative', zIndex: 1100, pointerEvents: 'auto' }}>
               <Paper elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', height: '100%', display: 'flex', flexDirection: 'column' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: 'text.primary' }}>Planning</Typography>
+                  <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: 'text.primary' }}>Sessions</Typography>
                 {isAdmin && (
                     <Button 
                       size="small" 

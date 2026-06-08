@@ -233,7 +233,7 @@ export default function SessionsManagementDialog({
                           await onAddJuryMaster(newJuryName)
                           setNewJuryName('')
                         }}
-                        endIcon={<AddIcon />}
+                        endIcon={<AddIcon />} variant="text"
                         sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 1, height: 32, mr: -0.5 }}
                       >
                         Créer jury

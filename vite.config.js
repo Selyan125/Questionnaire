@@ -15,6 +15,10 @@ export default defineConfig({
         secure: false,
       },
     },
+    allowedHosts: [
+      'questionnaire.jrcan.dev',
+      'localhost'
+    ],
     watch: {
       ignored: ['**/node_modules/**', '**/.git/**'],
       usePolling: true,
