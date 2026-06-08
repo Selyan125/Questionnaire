@@ -196,7 +196,9 @@ export default function Dashboard() {
           {/* Profile Section */}
           <Box sx={{ p: 3, mb: 1 }}>
             <Stack direction="row" spacing={2} alignItems="center">
-              
+              <Avatar sx={{ bgcolor: 'primary.main', width: 34, height: 34, fontSize: 13, fontWeight: 700 }}>
+                {user?.email?.charAt(0).toUpperCase() || 'U'}
+              </Avatar>
               <Box sx={{ minWidth: 0 }}>
                 <Typography noWrap sx={{ fontWeight: 700, fontSize: 14 }}>
                   {user?.email || 'Utilisateur'}
@@ -346,12 +348,12 @@ export default function Dashboard() {
 
               
               <Box sx={{ mt: 6 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, mb: 2.5 }}>Derniers Questionnaires</Typography>
-                <Grid container spacing={2}>
+                <Typography variant="h6" sx={{ fontWeight: 700, mb: 4, textAlign: 'center' }}>Questionnaires disponibles</Typography>
+                <Grid container spacing={4} justifyContent="center">
                   {questionnaires && questionnaires.length ? (
                     questionnaires.map(q => (
-                      <Grid item key={q.id} xs={12} sm={6} md={4}>
-                        <Paper sx={{ p: 2.5, borderRadius: 4, border: '1px solid rgba(0,0,0,0.07)', display: 'flex', flexDirection: 'column', gap: 2, bgcolor: '#fff', '&:hover': { boxShadow: '0 4px 20px rgba(0,0,0,0.04)' } }} elevation={0}>
+                      <Grid item key={q.id} xs={12} sm={6} md={3.8}>
+                        <Box sx={{ p: 3, borderRadius: 4, bgcolor: 'rgba(0,0,0,0.025)', display: 'flex', flexDirection: 'column', gap: 2, transition: 'background 0.2s', '&:hover': { bgcolor: 'rgba(0,0,0,0.05)' } }}>
                           <Box sx={{ mr: 2, minWidth: 0 }}>
                             <Typography sx={{ fontWeight: 700, fontSize: 15, mb: 0.5, noWrap: true }}>{q.title}</Typography>
                             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>ID: {q.id}</Typography>
@@ -388,7 +390,7 @@ export default function Dashboard() {
                               </Stack>
                             )}
                           </Box>
-                        </Paper>
+                        </Box>
                       </Grid>
                     ))
                   ) : (

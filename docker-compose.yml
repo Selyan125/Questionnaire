@@ -7,12 +7,12 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
-      DATABASE_URL: file:/app/backend/dev.db/data.db
+      DATABASE_URL: file:/app/backend/db/data.db
       JWT_SECRET: ${JWT_SECRET}
       ADMIN_EMAIL: ${ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
     volumes:
-      - ./app/backend/dev.db/data.db:/app/backend/dev.db/data.db
+      - ./app/backend/db:/app/backend/db
     ports:
       - "4000:4000"
     networks:

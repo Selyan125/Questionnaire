@@ -8,7 +8,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import CheckIcon from '@mui/icons-material/Check';
 import CloseIcon from '@mui/icons-material/Close';
 
-function TopAppBar({ pages, selectedPage, onSelectPage, onAddCategory, onRenamePage, title, onTitleChange, date, onDateChange, leftActions, centerActions, rightActions, hideDashboardLink = false }) {
+function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRenamePage, title, onTitleChange, date, onDateChange, leftActions, centerActions, rightActions, hideDashboardLink = false }) {
     const [editAnchorEl, setEditAnchorEl] = useState(null);
     const [editIndex, setEditIndex] = useState(null);
     const [editValue, setEditValue] = useState('');

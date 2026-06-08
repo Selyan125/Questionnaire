@@ -52,8 +52,11 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const navigate = useNavigate()
   const { id: idParam } = useParams()
   const effectiveQuestionnaireId = questionnaireId ?? idParam
-  const canEdit = !readOnly
-  const isAdmin = JSON.parse(localStorage.getItem('authUser') || '{}')?.admin === true
+  
+  const authUser = JSON.parse(localStorage.getItem('authUser') || '{}')
+  const isAdmin = authUser?.admin === true
+  const effectiveReadOnly = readOnly || !isAdmin
+  const canEdit = !effectiveReadOnly
 
   const [loading, setLoading] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -100,6 +103,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [sessionsList, selectedSessionId])
 
   const loadStudents = useCallback(async () => {
+    if (!isAdmin) return
     try {
       const s = await listStudents()
       setStudents(Array.isArray(s) ? s : [])
@@ -108,14 +112,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       console.error('Failed to load students', e)
       // If the API forbids access (student user), hide the sidebar to avoid exposing UI
       if (e && (e.status === 401 || e.status === 403)) {
-      
         setStudents([])
       }
     }
-  }, [selectedStudentId])
+  }, [selectedStudentId, isAdmin])
 
   const loadMembershipOptions = useCallback(async () => {
-    if (viewerMode !== 'teacher') return
+    if (viewerMode !== 'teacher' || !isAdmin) return
     try {
       const results = await Promise.allSettled([listTeachers(), listStudents(), listJuries()])
       
@@ -129,7 +132,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     } catch (e) {
       console.error('Failed to load questionnaire membership options', e)
     }
-  }, [viewerMode])
+  }, [viewerMode, isAdmin])
 
   const loadSessionsFromAPI = useCallback(async () => {
     try {
@@ -159,15 +162,10 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       return
     }
 
-    if (readOnly && showStudentsSidebar) {
+    if (effectiveReadOnly && showStudentsSidebar && isAdmin) {
       loadStudents()
     }
-  }, [
-    readOnly,
-    viewerMode,
-    showStudentsSidebar,
-    loadStudents,
-  ])
+  }, [effectiveReadOnly, viewerMode, showStudentsSidebar, loadStudents, isAdmin])
 
   // when selected student changes, load their answers for this questionnaire
   useEffect(() => {
@@ -546,7 +544,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   // Calculate score for teacher view
   const studentScore = useMemo(() => {
-    if (!readOnly || viewerMode !== 'teacher' || !questionnaire || !Array.isArray(questionnaire.categories)) {
+    if (!effectiveReadOnly || viewerMode !== 'teacher' || !questionnaire || !Array.isArray(questionnaire.categories)) {
       return null
     }
     let total = 0
@@ -649,7 +647,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 </span>
               </Tooltip>
             </Paper>
-          ) : (readOnly && viewerMode === 'teacher' && studentScore !== null) ? (
+          ) : (effectiveReadOnly && viewerMode === 'teacher' && studentScore !== null) ? (
             <Paper
               elevation={0}
               sx={{
@@ -690,7 +688,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               </Tooltip>
             </Paper>
           ) : null)}
-          hideDashboardLink={readOnly || !!rightActions}
+          hideDashboardLink={effectiveReadOnly || !!rightActions}
         />
         <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, pt: '76px', minHeight: 0, position: 'relative' }}>
           {viewerMode === 'teacher' && showStudentsSidebar && (
@@ -842,7 +840,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               {slots.map((p, i) => (
                 <Box key={p ? p.question.id : `slot-${i}`} sx={{ minHeight: 210, height: '100%', '& .MuiCard-root': { height: '100%' } }}>
                   {p ? (
-                    <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={!canEdit} onAnswerChange={handleAnswerChange} externalAnswer={collectedAnswers && collectedAnswers[p.question.id ? p.question.id : (i+1)]} />
+                    <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={!canEdit} onAnswerChange={handleAnswerChange} externalAnswer={collectedAnswers && (collectedAnswers[p.question.id] || collectedAnswers[`ans_q${p.question.id}`])} />
                   ) : (canAddQuestion && i === addSlotIndex) ? (
                     <Box
                       onClick={() => addQuestionToCategory(selectedCategoryId)}
