@@ -158,20 +158,23 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                         >
                             {title || 'Questionnaire'}
                         </Box>
-                        <Typography
-                            sx={{
-                                color: 'text.secondary',
-                                fontSize: 14,
-                                cursor: onDateChange ? 'pointer' : 'default',
-                            }}
-                            onClick={onDateChange ? (e) => openDatePopover(e) : undefined}
-                        >
-                            {formatDate(date) || 'Date non définie'}
-                        </Typography>
+                        {onDateChange && (
+                            <Typography
+                                sx={{
+                                    color: 'text.secondary',
+                                    fontSize: 14,
+                                    cursor: 'pointer', 
+                                }}
+                                onClick={openDatePopover}
+                            >
+                                {formatDate(date) || 'Date non définie'}
+                            </Typography>
+                        )}
                     </Box>
                 </Box>
-                <Popover
-                    open={!!anchorEl}
+                {onDateChange && ( 
+                    <Popover
+                        open={!!anchorEl}
                     anchorEl={anchorEl}
                     onClose={() => closeDatePopover()}
                     anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
@@ -192,15 +195,17 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                         <Button onClick={() => toggleDateTimeView()} variant="outlined" sx={{ minWidth: 120 }}>Afficher {openTo === 'day' ? 'l’heure' : 'la date'}</Button>
                         <Button onClick={() => saveDatePopover()} variant="text" sx={{ mx: 2, boxShadow: 'none' }}>Enregistrer</Button>
                     </Box>
-                </Popover>
+                    </Popover>
+                )}
 
                 <Box sx={{ gridColumn: 2, justifySelf: 'center', display: 'flex', alignItems: 'center', gap: 1, minWidth: 0 }}>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: 'center',
+                    {pages.length > 0 && (
+                        <Paper
+                            elevation={0}
+                            sx={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: 'center',
                             gap: 1,
                             px: 1.5,
                             py: 1,
@@ -276,6 +281,7 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                             </IconButton>
                         ) : null*/}
                     </Paper>
+                    )}
                     {centerActions || null}
                 </Box>
 

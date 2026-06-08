@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken'
+import argon2 from 'argon2'
 import { PrismaClient } from '@prisma/client'
 
 export const prisma = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL })
@@ -68,6 +69,19 @@ export async function mergeQuestionnaireSettings(questionnaires) {
     return { ...q, gradingMode: row.gradingMode || q.gradingMode, maxScore: row.maxScore ?? q.maxScore, audience: row.audience || q.audience, showResults: row.showResults ?? q.showResults, shuffleQuestions: row.shuffleQuestions ?? q.shuffleQuestions, juryGroups: q.juryGroups || safeParseJSON(row.juryGroups), sessions: q.sessions || safeParseJSON(row.sessions) }
   })
   return Array.isArray(questionnaires) ? merged : merged[0]
+}
+
+export async function hashPassword(password) {
+  return argon2.hash(password);
+}
+
+export function generatePassword(length = 8) {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()';
+  let password = '';
+  for (let i = 0; i < length; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
 }
 
 export async function getQuestionnaireMembers(questionnaireId) {

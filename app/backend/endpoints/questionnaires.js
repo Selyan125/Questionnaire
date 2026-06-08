@@ -28,6 +28,41 @@ async function replaceQuestionnaireMembers(questionnaireId, teacherIds = [], stu
   })
 }
 
+router.get('/export-all', requireAdmin, async (req, res) => {
+  try {
+    const questionnaires = await prisma.questionnaire.findMany({
+      include: {
+        categories: {
+          include: {
+            questions: {
+              include: {
+                elements: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    const students = await prisma.student.findMany({
+      select: { id: true, email: true, nom: true, prenom: true, isTest: true }
+    });
+
+    const teachers = await prisma.teacher.findMany({
+      select: { id: true, email: true, admin: true, jury: true }
+    });
+
+    res.json({
+      questionnaires: await mergeQuestionnaireSettings(questionnaires),
+      students,
+      teachers,
+      exportDate: new Date().toISOString()
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de l\'exportation globale' });
+  }
+});
+
 router.get('/', requireTeacher, async (req, res) => {
   const teacherId = Number(req.user.id);
   const questionnaires = await prisma.questionnaire.findMany({ where: req.user.admin ? {} : { sessions: { some: { active: true, juries: { some: { teacherId } } } } }, orderBy: { id: 'desc' }, include: { categories: true, sessions: { where: req.user.admin ? {} : { active: true, juries: { some: { teacherId } } }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } } } } })

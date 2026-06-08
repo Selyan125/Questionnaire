@@ -14,6 +14,7 @@ import AddIcon from '@mui/icons-material/Add';
 import AdminImport from './AdminImport.jsx';
 import StudentsView from '../components/StudentsView.jsx'
 import TeachersView from '../components/TeachersView.jsx'
+import TopAppBar from '../components/TopAppBar.jsx'
 import { useNavigate } from 'react-router-dom'
 import { getStats } from '../api/stats.js'
 import { listTeachers } from '../api/teachers.js'
@@ -41,6 +42,7 @@ export default function Dashboard() {
   const navigate = useNavigate()
   const [questionnaires, setQuestionnaires] = useState([])
   const [importMessage, setImportMessage] = useState(null)
+  const [exporting, setExporting] = useState(false)
 
 
   useEffect(() => {
@@ -102,23 +104,26 @@ export default function Dashboard() {
     }
   }
 
-  async function exportQuestionnaire(id) {
-    if (!id) return
+  async function handleGlobalExport() {
+    setExporting(true)
     try {
-      const resp = await apiFetch(`/api/questionnaires/${id}/export`)
+      const resp = await apiFetch('/api/questionnaires/export-all')
       if (!resp.ok) throw new Error(`Erreur serveur (${resp.status})`)
-      const blob = await resp.blob()
+      const data = await resp.json()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
       const url = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = url
-      link.download = `questionnaire-${id}.json`
+      link.download = `export-complet-${new Date().toISOString().split('T')[0]}.json`
       document.body.appendChild(link)
       link.click()
       link.remove()
       URL.revokeObjectURL(url)
     } catch (e) {
-      console.error(e)
+      console.error('Export error:', e)
       setImportMessage(e.message || 'Export impossible')
+    } finally {
+      setExporting(false)
     }
   }
 
@@ -167,7 +172,10 @@ export default function Dashboard() {
     { key: 'teachers', label: 'Enseignants', icon: <PersonIcon /> },
     { key: 'students', label: 'Étudiants', icon: <SchoolIcon /> },
   ]
-  if (isAdmin) menuItems.push({ key: 'import', label: 'Importer', icon: <UploadFileIcon /> })
+  if (isAdmin) {
+    menuItems.push({ key: 'export', label: 'Exporter', icon: <DownloadIcon /> })
+    menuItems.push({ key: 'import', label: 'Importer', icon: <UploadFileIcon /> })
+  }
 
   function logout() {
     localStorage.removeItem('authToken')
@@ -176,14 +184,17 @@ export default function Dashboard() {
   }
 
   return (
-    <Box sx={{ p: 2, height: '100vh', boxSizing: 'border-box', overflow: 'hidden' }}>
-      <Typography sx={{ fontSize: 24, fontWeight: 600, mb: 2, p: 1 }}>Tableau de bord</Typography>
+    <Box sx={{ height: '100vh', boxSizing: 'border-box', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+      <TopAppBar
+        title="Tableau de bord"
+        hideDashboardLink
+      />
 
-      <Box sx={{ display: 'flex', gap: 3, alignItems: 'stretch', height: '100%', minHeight: 0 }}>
+      <Box sx={{ display: 'flex', gap: 2, alignItems: 'stretch', flex: 1, minHeight: 0, pt: '72px', px: 2, pb: 2 }}>
         <Paper
           elevation={0}
           sx={{
-            width: 240,
+            width: 260,
             flex: '0 0 240px',
             height: '100%',
             display: 'flex',
@@ -196,9 +207,7 @@ export default function Dashboard() {
           {/* Profile Section */}
           <Box sx={{ p: 3, mb: 1 }}>
             <Stack direction="row" spacing={2} alignItems="center">
-              <Avatar sx={{ bgcolor: 'primary.main', width: 34, height: 34, fontSize: 13, fontWeight: 700 }}>
-                {user?.email?.charAt(0).toUpperCase() || 'U'}
-              </Avatar>
+              
               <Box sx={{ minWidth: 0 }}>
                 <Typography noWrap sx={{ fontWeight: 700, fontSize: 14 }}>
                   {user?.email || 'Utilisateur'}
@@ -273,11 +282,18 @@ export default function Dashboard() {
         </Paper>
 
         {/* Main content */}
-        <Box sx={{ flex: 1, overflow: 'auto', p: 4, minHeight: 0, bgcolor: '#fcfcfd' }}>
+        <Box sx={{ flex: 1, overflow: 'auto', p: { xs: 2, md: 3 }, minHeight: 0, bgcolor: '#fcfcfd' }}>
+          {importMessage && (
+            <Paper sx={{ p: 1.5, mb: 2, bgcolor: 'rgba(55, 57, 143, 0.05)', border: '1px solid rgba(55, 57, 143, 0.1)' }} elevation={0}><Typography variant="body2">{importMessage}</Typography></Paper>
+          )}
+
           {selectedMenu === 0 && (
             <>
-              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
-                <Typography sx={{ fontSize: 28, fontWeight: 600 }}>Statistiques & Informations</Typography>
+              <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', mb: 2 }}>
+                <Box>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: 'text.primary', letterSpacing: '-0.02em' }}>Vue d'ensemble</Typography>
+                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>Statistiques globales et gestion des questionnaires</Typography>
+                </Box>
                 {isAdmin && (
                   <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
                     <Button variant="text" startIcon={<AddIcon />} onClick={async () => {
@@ -290,18 +306,14 @@ export default function Dashboard() {
                         navigate('/admin/question-manager')
                       }
                     }} sx={{ textTransform: 'none' }}>Nouveau questionnaire</Button>
-                    <Button variant="text" component="label" startIcon={<UploadFileIcon />} sx={{ textTransform: 'none' }}>
-                      Importer questionnaire
-                      <input type="file" accept="application/json,.json" hidden onChange={handleQuestionnaireImport} />
-                    </Button>
+                  
 
 
                   </Box>
                 )}
               </Box>
 
-
-              <Grid container spacing={3} sx={{ mb: 3 }}>
+              <Grid container spacing={2} sx={{ mb: 2 }}>
                 {[{
                   title: 'Étudiants',
                   value: stats ? stats.students : '—',
@@ -311,8 +323,8 @@ export default function Dashboard() {
                   value: stats ? stats.teachers : '—',
                   icon: <PersonIcon sx={{ color: '#4050f0' }} />
                 },{
-                  title: 'Questionnaires (sur étudiants)',
-                  value: stats ? `${stats.questionnaires} / ${stats.students}` : '—',
+                  title: 'Questionnaires',
+                  value: stats ? stats.questionnaires : '—',
                   icon: <BarChartIcon sx={{ color: '#4050f0' }} />
                 },{
                   title: 'En cours',
@@ -324,18 +336,18 @@ export default function Dashboard() {
                   icon: <PieChartIcon sx={{ color: '#4050f0' }} />
                 }].map((card, i) => (
                   <Grid item xs={12} sm={6} md={3} key={i}>
-                    <Card elevation={0} sx={{ borderRadius: 4, border: '1px solid rgba(0,0,0,0.06)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-4px)' } }}>
-                      <CardContent sx={{ p: 3, '&:last-child': { pb: 3 } }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                    <Card elevation={0} sx={{ borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+                      <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                           <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'rgba(55, 57, 143, 0.05)', color: 'primary.main', display: 'flex' }}>
                             {React.cloneElement(card.icon, { fontSize: 'small' })}
                           </Box>
                         </Box>
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1 }}>
+                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem' }}>
                             {card.title}
                           </Typography>
-                          <Typography sx={{ fontSize: 28, fontWeight: 800, mt: 0.5 }}>{loadingStats ? <Skeleton width="40%" /> : card.value}</Typography>
+                          <Typography sx={{ fontSize: 22, fontWeight: 800, mt: 0.2 }}>{loadingStats ? <Skeleton width="40%" /> : card.value}</Typography>
                         </Box>
                       </CardContent>
                     </Card>
@@ -344,19 +356,17 @@ export default function Dashboard() {
               </Grid>
 
               {errorStats && <Typography color="error">{errorStats}</Typography>}
-              {importMessage && <Typography sx={{ color: 'text.secondary', mb: 1 }}>{importMessage}</Typography>}
 
-              
-              <Box sx={{ mt: 6 }}>
-                <Typography variant="h6" sx={{ fontWeight: 700, mb: 4, textAlign: 'center' }}>Questionnaires disponibles</Typography>
-                <Grid container spacing={4} justifyContent="center">
+              <Box sx={{ mt: 3 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1.5 }}>Questionnaires disponibles</Typography>
+                <Grid container spacing={1.5}>
                   {questionnaires && questionnaires.length ? (
                     questionnaires.map(q => (
-                      <Grid item key={q.id} xs={12} sm={6} md={3.8}>
-                        <Box sx={{ p: 3, borderRadius: 4, bgcolor: 'rgba(0,0,0,0.025)', display: 'flex', flexDirection: 'column', gap: 2, transition: 'background 0.2s', '&:hover': { bgcolor: 'rgba(0,0,0,0.05)' } }}>
+                      <Grid item key={q.id} xs={12} sm={6} md={4} lg={3}>
+                        <Box sx={{ p: 2, borderRadius: 3, bgcolor: 'rgba(0,0,0,0.025)', display: 'flex', flexDirection: 'column', gap: 1.5, transition: 'background 0.2s', '&:hover': { bgcolor: 'rgba(0,0,0,0.05)' } }}>
                           <Box sx={{ mr: 2, minWidth: 0 }}>
-                            <Typography sx={{ fontWeight: 700, fontSize: 15, mb: 0.5, noWrap: true }}>{q.title}</Typography>
-                            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>ID: {q.id}</Typography>
+                            <Typography noWrap sx={{ fontWeight: 700, fontSize: 14, mb: 0 }}>{q.title}</Typography>
+                            <Typography sx={{ fontSize: 11, color: 'text.secondary', opacity: 0.8 }}>ID: {q.id}</Typography>
                           </Box>
                           <Divider sx={{ opacity: 0.5 }} />
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -375,11 +385,6 @@ export default function Dashboard() {
                                 <Tooltip title="Résultats">
                                   <IconButton size="small" onClick={() => navigate(`/admin/questionnaire/${q.id}/results`)}>
                                     <BarChartIcon fontSize="small" />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Exporter">
-                                  <IconButton size="small" onClick={() => exportQuestionnaire(q.id)}>
-                                    <DownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                                 <Tooltip title="Supprimer">
@@ -419,7 +424,28 @@ export default function Dashboard() {
 
           {selectedMenu === 3 && isAdmin && (
             <>
-              <Typography sx={{ fontSize: 34, fontWeight: 600, mb: 2 }}>Import CSV</Typography>
+              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Exporter les données</Typography>
+              <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'background.paper' }}>
+                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                  Générez une sauvegarde complète du site au format JSON. Le fichier contiendra : questionnaires, étudiants, enseignants et résultats.
+                </Typography>
+                <Button 
+                  variant="contained" 
+                  disableElevation
+                  startIcon={<DownloadIcon />} 
+                  onClick={handleGlobalExport}
+                  disabled={exporting}
+                  sx={{ borderRadius: 2, px: 3, bgcolor: '#37398f', textTransform: 'none' }}
+                >
+                  {exporting ? 'Génération du fichier...' : 'Exporter (télécharger)'}
+                </Button>
+              </Paper>
+            </>
+          )}
+
+          {selectedMenu === 4 && isAdmin && (
+            <>
+              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Importation</Typography>
               <AdminImport />
             </>
           )}

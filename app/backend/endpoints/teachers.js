@@ -1,13 +1,8 @@
 import express from 'express'
 import argon2 from 'argon2'
-import crypto from 'crypto'
-import { prisma, normalizeEmail, requireTeacher, requireAdmin } from '../utils.js'
+import { prisma, normalizeEmail, requireTeacher, requireAdmin, generatePassword } from '../utils.js'
 
 const router = express.Router()
-
-async function generateRandomPassword() {
-  return crypto.randomBytes(9).toString('base64').replace(/\+/g, 'A').replace(/\//g, 'B').slice(0, 12)
-}
 
 router.get('/teachers', requireAdmin, async (req, res) => {
   try {
@@ -20,8 +15,8 @@ router.post('/teachers', requireAdmin, async (req, res) => {
   try {
     const { email, password, admin = false } = req.body
     if (!email) return res.status(400).json({ error: 'email is required' })
-    const normalizedEmail = normalizeEmail(email)
-    const plain = typeof password === 'string' && password.trim() ? password : await generateRandomPassword()
+    const normalizedEmail = normalizeEmail(email) // Use normalizeEmail from utils
+    const plain = typeof password === 'string' && password.trim() ? password : generatePassword()
     const hashed = await argon2.hash(plain)
     const created = await prisma.teacher.create({ data: { email: normalizedEmail, password: hashed, admin: !!admin } })
     const { password: _p, ...rest } = created
@@ -33,7 +28,7 @@ router.post('/teachers/:id/password', requireAdmin, async (req, res) => {
   try {
     const { password } = req.body
     const id = Number(req.params.id)
-    const plain = typeof password === 'string' && password.trim() ? password : await generateRandomPassword()
+    const plain = typeof password === 'string' && password.trim() ? password : generatePassword()
     const hashed = await argon2.hash(plain)
     await prisma.teacher.update({ where: { id }, data: { password: hashed } })
     res.json({ password: plain })

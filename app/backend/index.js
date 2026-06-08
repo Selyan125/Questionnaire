@@ -24,7 +24,7 @@ app.use('/api/students', studentsRouter)
 app.use('/api/questionnaires', questionnaireRouter)
 app.use('/api', sessionsRouter)
 app.use('/api', submissionsRouter)
-app.use('/api', adminRouter)
+app.use('/api/admin', adminRouter) // Correction du chemin de montage pour le routeur admin
 app.use('/api', apiRouter)
 
 app.get('/api/status', (req, res) => res.json({ status: "OK" }))

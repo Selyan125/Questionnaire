@@ -1,40 +1,218 @@
-import express from 'express'
-import argon2 from 'argon2'
-import crypto from 'crypto'
-import { prisma, requireAdmin, normalizeEmail } from '../utils.js'
+import express from 'express';
+import { prisma, requireAdmin, generatePassword, hashPassword } from '../utils.js';
 
-const router = express.Router()
+const router = express.Router();
 
-router.get('/stats', requireAdmin, async (req, res) => {
-  const s = await prisma.student.count(); const t = await prisma.teacher.count(); const q = await prisma.questionnaire.count(); const o = await prisma.questionnaire.count({ where: { openForStudents: true } })
-  res.json({ students: s, teachers: t, questionnaires: q, openQuestionnaires: o })
-})
+// Route for importing students/teachers via CSV
+router.post('/import', requireAdmin, async (req, res) => {
+  const { targetRole, users, isTest } = req.body;
+  const results = [];
 
-router.post('/admin/import', requireAdmin, async (req, res) => {
-  const { targetRole: tr, users, isTest } = req.body; if (!tr || !Array.isArray(users)) return res.status(400).json({ error: 'Missing data' })
-  const results = []
-  for (const u of users) {
-    const email = normalizeEmail(u.email); if (!email) continue
-    if (tr === 'teacher' ? await prisma.teacher.findUnique({ where: { email } }) : await prisma.student.findUnique({ where: { email } })) { results.push({ status: 'exists', email }); continue }
-    const plain = crypto.randomBytes(9).toString('base64').replace(/\+/g, 'A').replace(/\//g, 'B').slice(0, 12); const hashed = await argon2.hash(plain)
-    if (tr === 'teacher') { const c = await prisma.teacher.create({ data: { email, password: hashed } }); results.push({ status: 'created', id: c.id, email, password: plain }) }
-    else { const c = await prisma.student.create({ data: { email, password: hashed, nom: u.nom || u.lastName, prenom: u.prenom || u.firstName, isTest: !!(u.isTest || isTest) } }); results.push({ status: 'created', id: c.id, email, password: plain }) }
-  }
-  res.status(201).json({ results })
-})
+  for (const userData of users) {
+    try {
+      const { email, nom, prenom } = userData;
+      const generatedPassword = generatePassword(); 
+      const hashedPassword = await hashPassword(generatedPassword); 
 
-router.post('/admin/migrate-sessions', requireAdmin, async (req, res) => {
-  const qs = await prisma.questionnaire.findMany({ select: { id: true, sessions: true, juryMembers: { include: { teacher: true } } } })
-  for (const q of qs) {
-    let list = []
-    try { if (typeof q.sessions === 'string') list = JSON.parse(q.sessions); else if (Array.isArray(q.sessions)) list = q.sessions } catch { continue }
-    const defJ = (await prisma.jury.findFirst())?.id
-    for (const sd of list) {
-      const s = await prisma.session.create({ data: { name: sd.name || 'Session', date: sd.date ? new Date(sd.date) : null, questionnaireId: q.id } })
-      for (const m of q.juryMembers) if (m.teacher.juryId) try { await prisma.sessionJury.create({ data: { sessionId: s.id, juryId: m.teacher.juryId, teacherId: m.teacherId } }) } catch {}
+      if (targetRole === 'student') {
+        const existingStudent = await prisma.student.findUnique({ where: { email } });
+        if (existingStudent) {
+          await prisma.student.update({
+            where: { id: existingStudent.id },
+            data: { nom, prenom, isTest: !!isTest },
+          });
+          results.push({ email, status: 'updated', message: 'Étudiant mis à jour' });
+        } else {
+          await prisma.student.create({
+            data: { email, password: hashedPassword, nom, prenom, isTest: !!isTest },
+          });
+          results.push({ email, status: 'created', password: generatedPassword, message: 'Étudiant créé' });
+        }
+      } else if (targetRole === 'teacher') {
+        const existingTeacher = await prisma.teacher.findUnique({ where: { email } });
+        if (existingTeacher) {
+          await prisma.teacher.update({
+            where: { id: existingTeacher.id },
+            data: { nom, prenom }, 
+          });
+          results.push({ email, status: 'updated', message: 'Enseignant mis à jour' });
+        } else {
+          await prisma.teacher.create({
+            data: { email, password: hashedPassword, nom, prenom },
+          });
+          results.push({ email, status: 'created', password: generatedPassword, message: 'Enseignant créé' });
+        }
+      } else {
+        results.push({ email, status: 'error', reason: 'Rôle cible inconnu' });
+      }
+    } catch (e) {
+      results.push({ email: userData.email, status: 'error', reason: e.message });
     }
   }
-  res.json({ status: 'success' })
-})
+  res.status(200).json({ results });
+});
 
-export default router
+router.post('/import-all', requireAdmin, async (req, res) => {
+  const { questionnaires, students, teachers } = req.body;
+  const importSummary = {
+    questionnaires: { created: 0, updated: 0, errors: [] },
+    students: { created: 0, updated: 0, errors: [] },
+    teachers: { created: 0, updated: 0, errors: [] },
+  };
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // Import Teachers
+      for (const teacherData of teachers) {
+        try {
+          const existingTeacher = await tx.teacher.findUnique({ where: { email: teacherData.email } });
+          if (existingTeacher) {
+            await tx.teacher.update({
+              where: { id: existingTeacher.id },
+              data: {
+                admin: teacherData.admin,
+                jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
+              },
+            });
+            importSummary.teachers.updated++;
+          } else {
+            const newPassword = generatePassword();
+            const hashedPassword = await hashPassword(newPassword);
+            await tx.teacher.create({
+              data: {
+                email: teacherData.email,
+                password: hashedPassword,
+                admin: teacherData.admin,
+                jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
+              },
+            });
+            importSummary.teachers.created++;
+          }
+        } catch (e) {
+          importSummary.teachers.errors.push({ email: teacherData.email, error: e.message });
+        }
+      }
+
+      // Import Students
+      for (const studentData of students) {
+        try {
+          const existingStudent = await tx.student.findUnique({ where: { email: studentData.email } });
+          if (existingStudent) {
+            await tx.student.update({
+              where: { id: existingStudent.id },
+              data: {
+                nom: studentData.nom,
+                prenom: studentData.prenom,
+                isTest: studentData.isTest,
+              },
+            });
+            importSummary.students.updated++;
+          } else {
+            const newPassword = generatePassword();
+            const hashedPassword = await hashPassword(newPassword);
+            await tx.student.create({
+              data: {
+                email: studentData.email,
+                password: hashedPassword,
+                nom: studentData.nom,
+                prenom: studentData.prenom,
+                isTest: studentData.isTest,
+              },
+            });
+            importSummary.students.created++;
+          }
+        } catch (e) {
+          importSummary.students.errors.push({ email: studentData.email, error: e.message });
+        }
+      }
+
+      // Import Questionnaires
+      for (const qData of questionnaires) {
+        try {
+          let questionnaireId;
+          const existingQuestionnaire = await tx.questionnaire.findFirst({ where: { title: qData.title } });
+          if (existingQuestionnaire) {
+            questionnaireId = existingQuestionnaire.id;
+            await tx.questionnaire.update({
+              where: { id: questionnaireId },
+              data: {
+                title: qData.title,
+                openForStudents: qData.openForStudents,
+                gradingMode: qData.gradingMode,
+                maxScore: qData.maxScore,
+                audience: qData.audience,
+                showResults: qData.showResults,
+                shuffleQuestions: qData.shuffleQuestions,
+                date: qData.date ? new Date(qData.date) : null,
+                juryGroups: typeof qData.juryGroups === 'object' ? JSON.stringify(qData.juryGroups) : qData.juryGroups,
+                sessions: typeof qData.sessions === 'object' ? JSON.stringify(qData.sessions) : qData.sessions,
+              },
+            });
+            importSummary.questionnaires.updated++;
+            // Delete and re-create nested categories, questions, elements for simplicity
+            await tx.questionElement.deleteMany({ where: { question: { category: { questionnaireId: questionnaireId } } } });
+            await tx.question.deleteMany({ where: { category: { questionnaireId: questionnaireId } } });
+            await tx.questionCategory.deleteMany({ where: { questionnaireId: questionnaireId } });
+          } else {
+            const newQuestionnaire = await tx.questionnaire.create({
+              data: {
+                title: qData.title,
+                openForStudents: qData.openForStudents,
+                gradingMode: qData.gradingMode,
+                maxScore: qData.maxScore,
+                audience: qData.audience,
+                showResults: qData.showResults,
+                shuffleQuestions: qData.shuffleQuestions,
+                date: qData.date ? new Date(qData.date) : null,
+                juryGroups: typeof qData.juryGroups === 'object' ? JSON.stringify(qData.juryGroups) : qData.juryGroups,
+                sessions: typeof qData.sessions === 'object' ? JSON.stringify(qData.sessions) : qData.sessions,
+              },
+            });
+            questionnaireId = newQuestionnaire.id;
+            importSummary.questionnaires.created++;
+          }
+
+          // Import Categories, Questions, Elements
+          for (const catData of qData.categories) {
+            const newCategory = await tx.questionCategory.create({
+              data: {
+                title: catData.title,
+                currentNote: catData.currentNote,
+                questionnaireId: questionnaireId,
+              },
+            });
+            for (const qItemData of catData.questions) {
+              const newQuestion = await tx.question.create({
+                data: {
+                  title: qItemData.title,
+                  questionCategoryId: newCategory.id,
+                },
+              });
+              for (const elData of qItemData.elements) {
+                await tx.questionElement.create({
+                  data: {
+                    type: elData.type,
+                    title: elData.title,
+                    priority: elData.priority,
+                    evaluatingType: elData.evaluatingType,
+                    evaluatingValue: elData.evaluatingValue,
+                    questionId: newQuestion.id,
+                  },
+                });
+              }
+            }
+          }
+        } catch (e) {
+          importSummary.questionnaires.errors.push({ title: qData.title, error: e.message });
+        }
+      }
+    });
+
+    res.status(200).json({ message: 'Importation complète réussie', summary: importSummary });
+  } catch (err) {
+    console.error('Global import transaction failed:', err);
+    res.status(500).json({ error: 'Erreur lors de l\'importation globale', details: err.message, summary: importSummary });
+  }
+});
+
+export default router;

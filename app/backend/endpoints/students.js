@@ -1,7 +1,6 @@
 import express from 'express'
 import argon2 from 'argon2'
-import crypto from 'crypto'
-import { prisma, requireTeacher, requireAdmin } from '../utils.js'
+import { prisma, requireTeacher, requireAdmin, generatePassword } from '../utils.js'
 
 const router = express.Router()
 
@@ -50,7 +49,7 @@ router.patch('/:id/jury', requireAdmin, async (req, res) => {
 router.post('/:id/password', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id)
-    const plain = crypto.randomBytes(9).toString('base64').replace(/\+/g, 'A').replace(/\//g, 'B').slice(0, 12)
+    const plain = generatePassword()
     const hashed = await argon2.hash(plain)
     await prisma.student.update({ where: { id }, data: { password: hashed } })
     res.json({ password: plain })

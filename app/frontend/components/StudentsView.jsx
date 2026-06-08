@@ -166,7 +166,7 @@ export default function StudentsView() {
         ) : (
           filtered.length === 0 ? (
             <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Typography color="text.secondary">Aucun étudiant/enseignant ajouté</Typography>
+              <Typography color="text.secondary">La liste des étudiants est vide.</Typography>
             </Box>
           ) : (
             <Box sx={{ overflowX: 'auto', flex: 1, minWidth: 0 }}>

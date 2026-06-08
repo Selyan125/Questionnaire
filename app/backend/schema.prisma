@@ -1,4 +1,3 @@
-// Prisma schema for a simple Note model
 // Uses SQLite for local development
 
 datasource db {
