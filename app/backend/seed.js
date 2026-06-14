@@ -20,7 +20,7 @@ async function main() {
   await prisma.teacher.upsert({
     where: { email: adminEmail },
     update: { password: hashed, admin: true },
-    create: { email: adminEmail, password: hashed, admin: true }
+    create: { email: adminEmail, password: hashed, admin: true, name: 'Admin', lastName: 'User' }
   })
 
   console.log('Admin user created:', adminEmail)

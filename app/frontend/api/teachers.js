@@ -36,8 +36,8 @@ export function resetTeacherPassword(teacherId, password) {
   })
 }
 
-export async function createTeacher({ email, password, jury } = {}) {
-  const payload = { email }
+export async function createTeacher({ email, password, nom, prenom, jury } = {}) {
+  const payload = { email, nom, prenom }
   if (password) payload.password = password
   const data = await apiJson('/api/teachers', { method: 'POST', json: payload })
   if (jury && data && data.id) {
@@ -48,4 +48,12 @@ export async function createTeacher({ email, password, jury } = {}) {
     }
   }
   return data
+}
+
+export function updateTeacher(id, data) {
+  return apiJson(`/api/teachers/${id}`, { method: 'PUT', json: data })
+}
+
+export function deleteTeachers(ids) {
+  return apiJson('/api/teachers', { method: 'DELETE', json: { ids } })
 }

@@ -1,20 +1,19 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, TextField, Paper, Typography, MenuItem, Box, Link } from '@mui/material'
+import { Button, TextField, Paper, Typography, Box, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material'
 import { login } from '../api/auth.js'
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [role, setRole] = useState('teacher')
   const [error, setError] = useState(null)
   const navigate = useNavigate()
 
-  async function submit(e) {
+  async function handleSubmit(e) {
     e.preventDefault()
     setError(null)
     try {
-      const data = await login({ email: email.trim(), password, role })
+      const data = await login({ email: email.trim(), password })
       if (!data || !data.token) {
         setError('Réponse invalide du serveur')
         return
@@ -24,9 +23,7 @@ export default function Login() {
       
       // Redirect based on role and admin status
       const user = data.user || {}
-      if (user.role === 'student') {
-        navigate('/student')
-      } else if (user.role === 'teacher' && !user.admin) {
+      if (user.role === 'teacher' && !user.admin) {
         navigate('/teacher-sessions')
       } else {
         navigate('/dashboard')
@@ -80,7 +77,7 @@ export default function Login() {
           <Typography variant="body2" color="text.secondary">Connexion</Typography>
         </Box>
 
-        <Box component="form" onSubmit={submit}>
+        <Box component="form" onSubmit={handleSubmit}>
           <TextField
             label="Email"
             value={email}
@@ -106,20 +103,6 @@ export default function Login() {
             sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
           />
 
-          <TextField
-            select
-            label="Rôle"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            fullWidth
-            margin="normal"
-            variant="outlined"
-            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 3 } }}
-          >
-            <MenuItem value="teacher">Enseignant</MenuItem>
-            <MenuItem value="student">Étudiant</MenuItem>
-          </TextField>
-
           {error && (
             <Typography color="error" variant="body2" sx={{ mt: 2, p: 1.5, bgcolor: 'rgba(211,47,47,0.08)', borderRadius: 2 }}>{error}</Typography>
           )}
@@ -127,6 +110,6 @@ export default function Login() {
           <Button type="submit" variant="contained" color="primary" fullWidth sx={{ mt: 3, py: 1.2, fontWeight: 600, borderRadius: 3, textTransform: 'none' }}>Se connecter</Button>
         </Box>
       </Paper>
-    </Box>
+    </Box> // No changes needed here, already rounded.
   )
 }

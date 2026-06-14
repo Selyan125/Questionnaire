@@ -8,6 +8,8 @@ import {
   Tooltip,
   Paper,
   Drawer,
+  Snackbar,
+  Alert,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -21,9 +23,11 @@ import {
   TextField,
   FormControlLabel,
   Switch,
+  Avatar,
   Radio,
   Checkbox,
   Chip,
+  Collapse,
 } from '@mui/material'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -33,6 +37,8 @@ import SettingsIcon from '@mui/icons-material/Settings'
 import CloseIcon from '@mui/icons-material/Close'
 import SchoolIcon from '@mui/icons-material/School'
 import CoPresentIcon from '@mui/icons-material/CoPresent'
+import SaveIcon from '@mui/icons-material/Save'
+import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopAppBar from '../components/TopAppBar.jsx'
 import QuestionComponent from '../components/QuestionComponent.jsx'
@@ -43,6 +49,8 @@ import { addQuestionToCategory as addQuestionToCategoryApi, deleteCategory as de
 import { listStudents } from '../api/students.js'
 import { listTeachers, listJuries, createJuryMaster } from '../api/teachers.js'
 import { createSession, getQuestionnaireSessions, updateSession, deleteSession, addJuryToSession, removeJuryFromSession, addStudentToSession, removeStudentFromSession, updateSessionStudentJury } from '../api/sessions.js'
+import { moveQuestion, reorderQuestions as reorderQuestionsApi } from '../api/questions.js'
+import { apiJson } from '../api/http.js'
 
 const Transition = React.forwardRef(function Transition(props, ref) {
   return <Slide direction="left" ref={ref} {...props} />
@@ -64,17 +72,54 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const [questionnaire, setQuestionnaire] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(null)
-  const [availableTeachers, setAvailableTeachers] = useState([])
+  const [expandedGroups, setExpandedGroups] = useState({}) // State for expanding/collapsing jury groups
+  const [availableTeachers, setAvailableTeachers] = useState([]) // Keep this
   const [availableStudents, setAvailableStudents] = useState([])
   const [availableJuries, setAvailableJuries] = useState([])
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false)
   const [sessionDetails, setSessionDetails] = useState([])
   const [selectedSessionId, setSelectedSessionId] = useState(null)
   const [dragOverTarget, setDragOverTarget] = useState(null)
+  const [draggedQuestionId, setDraggedQuestionId] = useState(null)
+
+  const [evaluatedStudentIds, setEvaluatedStudentIds] = useState(new Set())
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' })
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null)
-  const pages = questionnaire && questionnaire.categories ? questionnaire.categories.map(c => ({ name: c.title, id: c.id })) : [{ name: 'Questions', id: null }]
+  const pages = questionnaire?.categories ? questionnaire.categories.map(c => ({ name: c.title, id: c.id, maxPoints: c.currentNote })) : [{ name: 'Questions', id: null }]
   const [selectedPageIndex, setSelectedPageIndex] = useState(0)
+
+  const flat = useMemo(() => {
+    if (!questionnaire?.categories) return []
+    return questionnaire.categories.flatMap(c =>
+      (selectedCategoryId && c.id !== selectedCategoryId)
+        ? []
+        : [...(c.questions || [])]
+            .sort((a, b) => (Number(a.priority || 0) - Number(b.priority || 0)))
+            .map(q => ({ category: c, question: q }))
+    )
+  }, [questionnaire, selectedCategoryId])
+
+  const selectedCategory = useMemo(() => {
+    const cats = questionnaire && Array.isArray(questionnaire.categories) ? questionnaire.categories : []
+    const cat = cats.find(c => c.id === selectedCategoryId) || null
+    if (!cat) return null
+    return {
+      ...cat,
+      questions: [...(cat.questions || [])].sort((a, b) => (Number(a.priority || 0) - Number(b.priority || 0)))
+    }
+  }, [questionnaire, selectedCategoryId])
+
+  const currentSession = useMemo(() => {
+    return sessionDetails.find(s => s.id === selectedSessionId);
+  }, [sessionDetails, selectedSessionId]);
+
+  const visibleStudents = useMemo(() => {
+    if (!currentSession) return []
+    if (isAdmin) return currentSession.students || []
+    const isTeacherInSession = currentSession.juries?.some(j => j.teacherId === authUser.id)
+    return isTeacherInSession ? (currentSession.students || []) : []
+  }, [currentSession, isAdmin, authUser.id])
 
   function safeParseJSON(value) {
     if (typeof value !== 'string') return value
@@ -86,39 +131,20 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }
 
   // students sidebar state: controlled by parent via propShowStudentsSidebar
-  const [students, setStudents] = useState([])
   const [selectedStudentId, setSelectedStudentId] = useState(null)
-  const showStudentsSidebar = viewerMode === 'teacher' && propShowStudentsSidebar !== false
-  const sessionsList = sessionDetails
-  const selectedSession = sessionsList.find(s => String(s.id) === String(selectedSessionId))
-  const allStudents = availableStudents && availableStudents.length ? availableStudents : students
-  const visibleStudents = selectedSession && selectedSession.students && selectedSession.students.length > 0
-    ? selectedSession.students
-    : allStudents
 
   useEffect(() => {
-    if (!selectedSessionId && sessionsList.length) {
-      setSelectedSessionId(sessionsList[0].id)
+    if (!selectedSessionId && sessionDetails.length) {
+      setSelectedSessionId(sessionDetails[0].id)
     }
-  }, [sessionsList, selectedSessionId])
+  }, [sessionDetails, selectedSessionId])
 
-  const loadStudents = useCallback(async () => {
-    if (!isAdmin) return
-    try {
-      const s = await listStudents()
-      setStudents(Array.isArray(s) ? s : [])
-      if (s && s.length && !selectedStudentId) setSelectedStudentId(s[0].id || s[0]._id)
-    } catch (e) {
-      console.error('Failed to load students', e)
-      // If the API forbids access (student user), hide the sidebar to avoid exposing UI
-      if (e && (e.status === 401 || e.status === 403)) {
-        setStudents([])
-      }
-    }
-  }, [selectedStudentId, isAdmin])
+  const toggleGroup = (name) => {
+    setExpandedGroups(prev => ({ ...prev, [name]: !prev[name] }))
+  }
 
   const loadMembershipOptions = useCallback(async () => {
-    if (viewerMode !== 'teacher' || !isAdmin) return
+    if (!isAdmin) return
     try {
       const results = await Promise.allSettled([listTeachers(), listStudents(), listJuries()])
       
@@ -126,9 +152,9 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       const studentsJson = results[1].status === 'fulfilled' ? results[1].value : []
       const juriesJson = results[2].status === 'fulfilled' ? results[2].value : []
 
-      setAvailableTeachers(Array.isArray(teachersJson) ? teachersJson : [])
-      setAvailableStudents(Array.isArray(studentsJson) ? studentsJson : [])
-      setAvailableJuries(Array.isArray(juriesJson) ? juriesJson : [])
+      setAvailableTeachers(teachersJson)
+      setAvailableStudents(studentsJson)
+      setAvailableJuries(juriesJson)
     } catch (e) {
       console.error('Failed to load questionnaire membership options', e)
     }
@@ -144,6 +170,15 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }, [effectiveQuestionnaireId])
 
+  const loadEvaluatedStatus = useCallback(async () => {
+    if (!effectiveQuestionnaireId) return
+    try {
+      const results = await apiJson(`/api/questionnaires/${effectiveQuestionnaireId}/results`)
+      const ids = new Set(results.map(r => r.studentId))
+      setEvaluatedStudentIds(ids)
+    } catch (e) { console.error(e) }
+  }, [effectiveQuestionnaireId])
+
   useEffect(() => {
     if (settingsOpen) {
       loadMembershipOptions()
@@ -154,52 +189,67 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     if (!effectiveQuestionnaireId) return
     loadMembershipOptions()
     loadSessionsFromAPI()
+    loadEvaluatedStatus()
   }, [effectiveQuestionnaireId, loadMembershipOptions, loadSessionsFromAPI])
 
-  useEffect(() => {
-    if (viewerMode !== 'teacher') {
-      setStudents([])
-      return
-    }
-
-    if (effectiveReadOnly && showStudentsSidebar && isAdmin) {
-      loadStudents()
-    }
-  }, [effectiveReadOnly, viewerMode, showStudentsSidebar, loadStudents, isAdmin])
-
   // when selected student changes, load their answers for this questionnaire
-  useEffect(() => {
-    async function loadForStudent() {
-      // Never fetch other students results outside of teacher view
-      if (viewerMode !== 'teacher') return
-      if (!selectedStudentId) return
+  const loadForStudent = useCallback(async (studentId) => {
+    if (!studentId || !effectiveQuestionnaireId) return
+    try {
+      // On cherche les soumissions existantes pour cet étudiant et ce questionnaire
+      const res = await getStudentResults(studentId)
+      const submissions = Array.isArray(res) ? res : (res?.results || [])
+      
+      // On filtre pour trouver la soumission correspondant à la session actuelle ou la plus récente
+      const submission = submissions.find(s => 
+        Number(s.questionnaireId) === Number(effectiveQuestionnaireId) && 
+        (selectedSessionId ? Number(s.sessionId) === Number(selectedSessionId) : true)
+      )
 
-      try {
-        const res = await getStudentResults(selectedStudentId)
-        // res can be array of submissions or object
-        let submission = null
-        if (Array.isArray(res)) submission = res.find(r => String((r && r.questionnaireId) || (r && r.questionnaire) || '') === String(effectiveQuestionnaireId))
-        else if (res && Array.isArray(res.results)) submission = res.results.find(r => String((r && r.questionnaireId) || (r && r.questionnaire) || '') === String(effectiveQuestionnaireId))
-        else if (res && res.questionnaireId && String(res.questionnaireId) === String(effectiveQuestionnaireId)) submission = res
-
-        if (submission && Array.isArray(submission.answers)) {
-          const map = {}
-          for (const a of submission.answers) {
-            const qId = (a && a.questionId) || a.id || a.question || null
-            if (!qId) continue
-            map[qId] = a.answer
-          }
-          setCollectedAnswers(map)
-        } else {
-          setCollectedAnswers({})
-        }
-      } catch (e) {
-        console.error('Failed to load student results', e)
+      if (submission && submission.answers) {
+        const answers = typeof submission.answers === 'string' ? JSON.parse(submission.answers) : submission.answers
+        setCollectedAnswers(answers)
+      } else {
         setCollectedAnswers({})
       }
+    } catch (e) {
+      console.error('Failed to load student results', e)
+      setCollectedAnswers({})
     }
-    loadForStudent()
-  }, [selectedStudentId, effectiveQuestionnaireId, viewerMode])
+  }, [effectiveQuestionnaireId, selectedSessionId])
+
+  useEffect(() => {
+    if (selectedStudentId) loadForStudent(selectedStudentId)
+  }, [selectedStudentId, loadForStudent])
+
+  const saveSubmission = async () => {
+    if (!selectedStudentId || !selectedSessionId || !effectiveQuestionnaireId) {
+      setError("Veuillez sélectionner un étudiant et une session.")
+      return
+    }
+    try {
+      setLoading(true)
+      await apiJson('/api/submissions', {
+        method: 'POST',
+        json: {
+          studentId: selectedStudentId,
+          questionnaireId: Number(effectiveQuestionnaireId),
+          sessionId: Number(selectedSessionId),
+          evaluatorId: authUser.id, // On enregistre qui a noté
+          answers: collectedAnswers,
+          score: studentScore
+        }
+      })
+      setSnackbar({ open: true, message: "Évaluation enregistrée avec succès !", severity: 'success' })
+      setSelectedStudentId(null) // On déselectionne pour passer au suivant
+      setCollectedAnswers({})
+      await loadEvaluatedStatus()
+    } catch (e) {
+      setSnackbar({ open: true, message: "Erreur lors de la sauvegarde : " + e.message, severity: 'error' })
+    } finally {
+      setLoading(false)
+    }
+  }
 
 
   const load = useCallback(async () => {
@@ -222,8 +272,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   useEffect(() => {
     const cats =
-      questionnaire?.categories ?? []
-
+      questionnaire?.categories || []
     if (!cats.length) {
       setSelectedCategoryId(null)
       setSelectedPageIndex(0)
@@ -231,8 +280,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
 
     const ids = cats.map(c => c.id)
-
-    const nextId =
+    const nextId = 
       ids.includes(selectedCategoryId)
         ? selectedCategoryId
         : cats[0].id
@@ -248,7 +296,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [questionnaire])
 
   useEffect(() => {
-    const cats = (questionnaire && Array.isArray(questionnaire.categories)) ? questionnaire.categories : []
+    const cats = questionnaire?.categories || []
     if (!cats.length) {
       setSelectedCategoryId(null)
       setSelectedPageIndex(0)
@@ -257,8 +305,8 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
     const ids = cats.map(c => c.id)
     const nextId = (selectedCategoryId && ids.includes(selectedCategoryId)) ? selectedCategoryId : cats[0].id
-    const nextIdx = Math.max(0, cats.findIndex(c => c.id === nextId))
-
+    const nextIdx = Math.max(0, cats.findIndex(c => c.id === nextId)) 
+    
     setSelectedCategoryId(prev => (prev === nextId ? prev : nextId))
     setSelectedPageIndex(prev => (prev === nextIdx ? prev : nextIdx))
   }, [questionnaire, selectedCategoryId])
@@ -277,20 +325,17 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   // try to restore saved answers from localStorage on mount
   useEffect(() => {
-  try {
-    const raw =
-      localStorage.getItem(
-        `answers_${effectiveQuestionnaireId}`
-      )
+    if (selectedStudentId) return // Don't use localStorage if a student is selected
+    try {
+      const raw = localStorage.getItem(`answers_${effectiveQuestionnaireId}`)
+      setCollectedAnswers(raw ? JSON.parse(raw) : {})
+    } catch {
+      setCollectedAnswers({})
+    }
+  }, [effectiveQuestionnaireId, selectedStudentId])
 
-    setCollectedAnswers(
-      raw ? JSON.parse(raw) : {}
-    )
-  } catch {
-    setCollectedAnswers({})
-  }
-  }, [effectiveQuestionnaireId])
   useEffect(() => {
+    if (selectedStudentId) return // Don't sync to localStorage if a student is selected
     try {
       localStorage.setItem(
         `answers_${effectiveQuestionnaireId}`,
@@ -311,8 +356,11 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   async function addQuestionToCategory(catId) {
     if (!canEdit) return
-    if (!catId) return
-    const limit = questionnaire?.questionsLimit || 6
+    if (!catId) {
+      setError("Créez une catégorie avant d'ajouter une question.")
+      return
+    }
+    const limit = questionnaire?.questionsLimit || 6 // Default limit
     const targetCat = questionnaire?.categories?.find(c => c.id === catId)
     const count = targetCat?.questions?.length || 0
 
@@ -324,8 +372,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       setError(e.message)
     }
   }
-
-
 
   async function saveQuestionnaireTitle(title) {
     if (!canEdit) return;
@@ -360,7 +406,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   async function openSessionsDialog() {
     await loadMembershipOptions()
-    await loadSessionsFromAPI()
+    await loadSessionsFromAPI() // Ensure sessions are up-to-date
     setSessionsDialogOpen(true)
   }
 
@@ -375,7 +421,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   async function addSession() {
     try {
-      const newSession = await createSession(effectiveQuestionnaireId, { name: `Session ${sessionDetails.length + 1}`, date: null })
+      await createSession(effectiveQuestionnaireId, { name: `Session ${sessionDetails.length + 1}`, date: null })
       await loadSessionsFromAPI()
     } catch (err) {
       console.error('Could not create session:', err)
@@ -391,7 +437,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         ));
       }
 
-      const payload = {
+      const payload = { 
         name: name !== undefined ? name : current?.name,
         date: date !== undefined ? date : current?.date,
         active: active !== undefined ? active : current?.active
@@ -420,16 +466,17 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   async function addJuryToSessionUI(sessionId, juryId, teacherId) {
     try {
-      await addJuryToSession(sessionId, { juryId, teacherId })
+      await addJuryToSession(sessionId, { juryId, teacherId }) // API call
       await loadSessionsFromAPI()
     } catch (err) {
+      setError(err.message || "Erreur lors de l'ajout du membre du jury")
       console.error('Could not add jury:', err)
     }
   }
 
   async function removeJuryFromSessionUI(sessionJuryId) {
     try {
-      await removeJuryFromSession(sessionJuryId)
+      await removeJuryFromSession(sessionJuryId) // API call
       await loadSessionsFromAPI()
     } catch (err) {
       console.error('Could not remove jury:', err)
@@ -438,21 +485,67 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   async function addStudentToSessionUI(sessionId, studentId, juryId) {
     try {
-      await addStudentToSession(sessionId, { studentId, juryId })
+      await addStudentToSession(sessionId, { studentId, juryId }) // API call
       await loadSessionsFromAPI()
     } catch (err) {
+      setError(err.message || "Erreur lors de l'ajout de l'étudiant")
       console.error('Could not add student:', err)
     }
   }
 
   async function removeStudentFromSessionUI(sessionStudentId) {
     try {
-      await removeStudentFromSession(sessionStudentId)
+      await removeStudentFromSession(sessionStudentId) // API call
       await loadSessionsFromAPI()
     } catch (err) {
       console.error('Could not remove student:', err)
     }
   }
+
+  const groupedJuryData = useMemo(() => {
+    const session = sessionDetails.find(s => s.id === selectedSessionId)
+    if (!session) return []
+    const groups = {}
+    session.juries?.forEach(j => {
+      const name = j.juryName || 'Sans nom'
+      if (!groups[name]) groups[name] = { name, teachers: [], students: [] }
+      groups[name].teachers.push(j)
+    })
+    session.students?.forEach(s => {
+      const name = s.juryName || 'Sans nom'
+      if (!groups[name]) groups[name] = { name, teachers: [], students: [] }
+      groups[name].students.push(s)
+    })
+    return Object.values(groups)
+  }, [sessionDetails, selectedSessionId])
+
+  const handleQuestionDrop = useCallback(async (qId, targetCategoryId, targetPriority) => {
+    const numericQId = Number(qId)
+    if (effectiveReadOnly || isNaN(numericQId)) return
+
+    try {
+      if (Number(targetCategoryId) === Number(selectedCategoryId)) {
+        const questions = selectedCategory?.questions || []
+        const currentIdx = questions.findIndex(q => Number(q.id) === numericQId)
+        if (currentIdx === -1 || currentIdx === targetPriority) return
+        
+        const newOrder = [...questions]
+        const [moved] = newOrder.splice(currentIdx, 1)
+        newOrder.splice(targetPriority, 0, moved)
+        
+        await reorderQuestionsApi(selectedCategoryId, newOrder.map(q => q.id))
+      } else {
+        await moveQuestion(numericQId, { newCategoryId: targetCategoryId, newPriority: targetPriority })
+      }
+      await load()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setDraggedQuestionId(null)
+      setDragOverTarget(null)
+    }
+  }, [effectiveReadOnly, selectedCategoryId, selectedCategory, load])
+
 
   async function deleteCurrentCategory() {
     if (!canEdit) return
@@ -492,7 +585,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
-
   async function deleteQuestionnaire() {
     if (!canEdit) return
     if (!effectiveQuestionnaireId) return
@@ -509,33 +601,11 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
   }
 
-  const flat = useMemo(() => {
-  if (!questionnaire?.categories)
-    return []
-
-  return questionnaire.categories.flatMap(c =>
-    selectedCategoryId &&
-    c.id !== selectedCategoryId
-      ? []
-      : (c.questions || []).map(q => ({
-          category: c,
-          question: q,
-        }))
-  )
-}, [
-  questionnaire,
-  selectedCategoryId,
-])
-  const selectedCategory = useMemo(() => {
-    const cats = questionnaire && Array.isArray(questionnaire.categories) ? questionnaire.categories : []
-    return cats.find(c => c.id === selectedCategoryId) || null
-  }, [questionnaire, selectedCategoryId])
-
   const questionsLimit = questionnaire?.questionsLimit || 6
   const gridCols = questionsLimit <= 4 ? questionsLimit : Math.ceil(questionsLimit / 2)
   const canAddQuestion = canEdit && flat.length < questionsLimit
   const addSlotIndex = Math.min(flat.length, questionsLimit - 1)
-
+  
   const slots = useMemo(() => {
     const out = []
     for (let i = 0; i < questionsLimit; i++) out.push(flat[i] || null)
@@ -544,25 +614,53 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   // Calculate score for teacher view
   const studentScore = useMemo(() => {
-    if (!effectiveReadOnly || viewerMode !== 'teacher' || !questionnaire || !Array.isArray(questionnaire.categories)) {
+    if (!questionnaire || !Array.isArray(questionnaire.categories)) {
       return null
     }
     let total = 0
     for (const cat of questionnaire.categories) {
-      if (!Array.isArray(cat.questions)) continue
-      for (const q of cat.questions) {
-        const answer = collectedAnswers && collectedAnswers[q.id]
-        if (!Array.isArray(q.elements)) continue
-        for (const el of q.elements) {
-          if (!el || !el.evaluatingType) continue
-          const type = Number(el.evaluatingType)
-          if (type === 1 && answer === el.id) total += Number(el.evaluatingValue || 0)
-          if (type === 2 && answer !== el.id && answer !== null && answer !== undefined) total += Number(el.evaluatingValue || 0)
+      let catScore = 0
+      let catCeilings = []
+      
+      // On trie les questions par priorité car l'ordre influe sur le calcul (ex: coefficients)
+      const sortedQuestions = [...(cat.questions || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
+      
+      for (const q of sortedQuestions) {
+        const answer = collectedAnswers[q.id]
+        if (answer === undefined || answer === null) continue
+        
+        // Gestion des réponses uniques ou multiples
+        const selectedIds = Array.isArray(answer) ? answer.map(String) : [String(answer)]
+        
+        // On trie aussi les éléments par priorité au sein de la question
+        const sortedElements = [...(q.elements || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
+        
+        for (const el of sortedElements) {
+          if (selectedIds.includes(String(el.id))) {
+            const type = Number(el.evaluatingType || 0)
+            const val = Number(el.evaluatingValue || 0)
+            
+            if (type === 1) catScore += val // Ajoute
+            else if (type === 2) catScore -= val // Enlève
+            else if (type === 3) catScore *= val // Coefficient
+            else if (type === 5) catCeilings.push(val) // Plafond
+          }
         }
       }
+      
+      if (cat.currentNote && Number(cat.currentNote) > 0) {
+        catCeilings.push(Number(cat.currentNote))
+      }
+
+      // Application du plafond le plus restrictif si activé
+      if (catCeilings.length > 0) {
+        catScore = Math.min(catScore, Math.min(...catCeilings))
+      }
+      
+      total += catScore
     }
     return total
-  }, [collectedAnswers, questionnaire, readOnly, viewerMode])
+  }, [collectedAnswers, questionnaire])
 
   function evaluationLabel(element) {
     const type = Number(element?.evaluatingType || 0)
@@ -582,18 +680,89 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     effectiveQuestionnaireId,
     navigate,
   ])
-
   const selectPage = useCallback(
-  (idx) => {
-    setSelectedPageIndex(idx)
+    (idx) => {
+      setSelectedPageIndex(idx)
 
-    const p = pages[idx]
-    setSelectedCategoryId(
-      p?.id ?? null
-    )
-  },
-  [pages]
-)
+      const p = pages[idx]
+      setSelectedCategoryId(
+        p?.id ?? null
+      )
+    },
+    [pages]
+  )
+
+  const renderStudentsSidebar = () => (
+    <Box sx={{ 
+      width: 280, 
+      bgcolor: 'background.paper', 
+      borderRight: '1px solid rgba(0,0,0,0.06)', 
+      display: 'flex', 
+      flexDirection: 'column',
+      p: 2,
+      gap: 2
+    }}>
+      <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
+        Étudiants de la session
+      </Typography>
+      
+      <Box sx={{ 
+        flex: 1, 
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0.5,
+        '&::-webkit-scrollbar': { width: '4px' },
+        '&::-webkit-scrollbar-thumb': { background: 'rgba(0,0,0,0.05)', borderRadius: '10px' }
+      }}>
+        {visibleStudents.length > 0 ? visibleStudents.map((s) => (
+          <Button
+            key={s.studentId}
+            onClick={() => setSelectedStudentId(s.studentId)}
+            sx={{
+              justifyContent: 'flex-start',
+              textTransform: 'none',
+              borderRadius: '100px',
+              py: 1.5,
+              px: 2,
+              textAlign: 'left',
+              bgcolor: selectedStudentId === s.studentId ? 'rgba(97, 103, 189, 0.12)' : 'transparent',
+              color: selectedStudentId === s.studentId ? 'primary.main' : 'text.primary',
+              '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
+              position: 'relative'
+            }}
+          >
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+              <Avatar sx={{ 
+                width: 32, 
+                height: 32, 
+                fontSize: 14, 
+                bgcolor: selectedStudentId === s.studentId ? 'primary.main' : 'rgba(0,0,0,0.08)',
+                color: selectedStudentId === s.studentId ? 'white' : 'text.secondary'
+              }}>
+                {(s.studentNom?.[0] || '') + (s.studentPrenom?.[0] || '')}
+              </Avatar>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography noWrap sx={{ fontSize: 14, fontWeight: selectedStudentId === s.studentId ? 700 : 500 }}>
+                  {s.studentNom} {s.studentPrenom}
+                </Typography>
+                <Typography noWrap sx={{ fontSize: 11, opacity: 0.7 }}>
+                  {s.juryName}
+                </Typography>
+              </Box>
+                    {evaluatedStudentIds.has(s.studentId) && (
+                      <CheckCircleIcon sx={{ ml: 'auto', fontSize: 18, color: 'success.main', opacity: 0.8 }} />
+                    )}
+            </Box>
+          </Button>
+        )) : (
+          <Typography sx={{ fontSize: 13, color: 'text.secondary', textAlign: 'center', mt: 4, fontStyle: 'italic' }}>
+            Aucun étudiant à évaluer dans cette session.
+          </Typography>
+        )}
+      </Box>
+    </Box>
+  )
 
   return (
     <>
@@ -608,63 +777,54 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           onTitleChange={canEdit ? saveQuestionnaireTitle : undefined}
           date={questionnaire?.date}
           onDateChange={canEdit ? (newDate) => updateQuestionnaireSettings({ date: newDate }) : undefined}
-          centerActions={canEdit ? (
-            <Paper
-              elevation={0}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 0.25,
-                p: 1,
-                borderRadius: 4,
-                bgcolor: 'background.paper',
-                border: '1px solid rgba(0,0,0,0.10)',
-                boxShadow: 'none',
-              }}
-            >
-              <Tooltip title="Aperçu enseignant">
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={!selectedCategoryId}
-                    onClick={() => openPreview('teacher')}
-                    sx={{ width: 36, height: 36 }}
-                  >
-                    <CoPresentIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-              <Tooltip title="Aperçu étudiant">
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={!selectedCategoryId}
-                    onClick={() => openPreview('student')}
-                    sx={{ width: 36, height: 36 }}
-                  >
-                    <SchoolIcon fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            </Paper>
-          ) : (effectiveReadOnly && viewerMode === 'teacher' && studentScore !== null) ? (
-            <Paper
-              elevation={0}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 1.25,
-                bgcolor: 'background.paper',
-                border: '1px solid rgba(0,0,0,0.12)',
-                px: 2,
-                py: 0.75,
-                borderRadius: 2,
-              }}
-            >
-              <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
-              <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore} / ${questionnaire?.maxScore ?? 20}`}</Typography>
-            </Paper>
-          ) : null}
+          centerActions={(canEdit || studentScore !== null) ? (
+              <Paper 
+                elevation={0}
+                sx={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1.25,
+                  p: 0.75,
+                  px: (studentScore !== null) ? 2 : 0.75,
+                  borderRadius: 4,
+                  bgcolor: 'background.paper',
+                  border: '1px solid rgba(0,0,0,0.10)',
+                  boxShadow: 'none',
+                }}
+              >
+                {studentScore !== null && (
+                  <Box sx={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: 1.25, 
+                    mr: canEdit ? 1 : 0, 
+                    pr: canEdit ? 1 : 0, 
+                    borderRight: canEdit ? '1px solid rgba(0,0,0,0.1)' : 'none' 
+                  }}>
+                    <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
+                    <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore} / ${questionnaire?.maxScore ?? 20}`}</Typography>
+                  </Box>
+                )}
+            {!canEdit && selectedStudentId && (
+              <Button 
+                variant="contained" 
+                startIcon={<SaveIcon />} 
+                onClick={saveSubmission} 
+                disableElevation
+                sx={{ borderRadius: 100, textTransform: 'none', px: 3, ml: 1, fontWeight: 700 }}
+              >
+                Terminer
+              </Button>
+            )}
+                {canEdit && (
+                  <Tooltip title="Aperçu enseignant">
+                    <IconButton size="small" disabled={!selectedCategoryId} onClick={() => openPreview('teacher')} sx={{ width: 36, height: 36 }}>
+                      <CoPresentIcon fontSize="small" />
+                    </IconButton>
+                  </Tooltip>
+                )}
+              </Paper>
+            ) : null}
           rightActions={rightActions ?? (canEdit ? (
             <Paper
                 elevation={0}
@@ -673,7 +833,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   alignItems: 'center',
                   gap: 0.25,
                   p: 1,
-                  borderRadius: 4,
+                  borderRadius: 3,
                   bgcolor: 'background.paper',
                   border: '1px solid rgba(0,0,0,0.10)',
                   boxShadow: 'none',
@@ -691,75 +851,50 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           hideDashboardLink={effectiveReadOnly || !!rightActions}
         />
         <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, pt: '76px', minHeight: 0, position: 'relative' }}>
-          {viewerMode === 'teacher' && showStudentsSidebar && (
-            <Box sx={{ width: { xs: 80, sm: 300 }, flex: '0 0 auto', px: 2, py: 3, position: 'relative', zIndex: 1100, pointerEvents: 'auto' }}>
-              <Paper elevation={0} sx={{ p: 3, borderRadius: '24px', border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(12px)', height: '100%', display: 'flex', flexDirection: 'column' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 4 }}>
-                  <Typography sx={{ fontWeight: 700, fontSize: '1rem', color: 'text.primary' }}>Sessions</Typography>
-                {isAdmin && (
-                    <Button 
-                      size="small" 
-                      variant="text" 
-                      onClick={openSessionsDialog} 
-                      sx={{ borderRadius: 8, fontSize: '0.75rem', fontWeight: 700, textTransform: 'none' }}
-                    >
-                      Gérer
-                    </Button>
-                  )}
-                </Box>
-                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5, flex: 1, overflowY: 'auto' }}>
-                  {sessionsList && sessionsList.length ? sessionsList.map(session => (
-                    <Paper
-                      key={session.id}
-                      elevation={0}
-                      sx={{ 
-                        p: 2, 
-                        borderRadius: '16px', 
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        border: '1px solid rgba(0,0,0,0.06)',
-                        bgcolor: '#fff',
-                        opacity: session.active ? 1 : 0.8,
-                        transition: 'all 0.2s ease',
-                      }}
-                    >
-                      <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', overflow: 'hidden' }}>
-                        <Typography sx={{ fontWeight: 700, fontSize: '0.85rem', color: session.active ? 'text.primary' : 'text.secondary', noWrap: true }}>{session.name}</Typography>
-                        {session.date && (
-                          <Typography sx={{ fontSize: '0.7rem', opacity: 0.6 }}>{formatSessionDate(session.date)}</Typography>
-                        )}
-                      </Box>
-                      {isAdmin && (
-                        <Tooltip title={session.active ? "Session ouverte" : "Session fermée"}>
-                          <Switch 
-                            size="small" 
-                            checked={!!session.active} 
-                            onChange={(e, checked) => {
-                              e.stopPropagation();
-                              updateSessionDetails(session.id, session.name, session.date, checked);
-                            }}
-                            sx={{ ml: 1 }}
-                          />
-                        </Tooltip>
-                      )}
-                    </Paper>
-                  )) : (
-                    <Typography sx={{ color: 'text.secondary', fontSize: 13, textAlign: 'center', mt: 4 }}>Aucune session prévue</Typography>
-                  )}
-                </Box>
-              </Paper>
-            </Box>
-          )}
+          {/* Left Sidebar - Students List (MD3 Style) */}
+          {!canEdit && (viewerMode === 'teacher' || propShowStudentsSidebar) && renderStudentsSidebar()}
 
           {/* Center - questions grid */}
           <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Overlay de blocage si aucun étudiant n'est sélectionné en mode évaluation */}
+            {(previewMode === 'teacher' || (!canEdit && viewerMode === 'teacher')) && !selectedStudentId && (
+              <Box sx={{ 
+                position: 'absolute', 
+                inset: 0, 
+                bgcolor: 'rgba(252, 252, 253, 0.8)', 
+                backdropFilter: 'blur(4px)',
+                zIndex: 2000,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                p: 4
+              }}>
+                <Paper 
+                  elevation={0} 
+                  sx={{ 
+                    p: 4, 
+                    borderRadius: '28px', 
+                    textAlign: 'center', 
+                    maxWidth: 400, 
+                    border: '1px solid rgba(0,0,0,0.06)',
+                    boxShadow: '0 12px 40px rgba(0,0,0,0.05)'
+                  }}
+                >
+                  <SchoolIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2, opacity: 0.5 }} />
+                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Prêt pour l'évaluation ?</Typography>
+                  <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
+                    Veuillez sélectionner un étudiant dans la liste de gauche pour commencer à remplir le questionnaire.
+                  </Typography>
+                </Paper>
+              </Box>
+            )}
+
             {/* Navigation Arrows - Fixed and Centered in margins */}
             <Tooltip title="Catégorie précédente">
               <IconButton
                 size="small"
                 disabled={selectedPageIndex <= 0}
-                onClick={() => {
+                onClick={() => { 
                   setSelectedPageIndex(idx => {
                     const next = Math.max(0, idx - 1);
                     const p = pages[next];
@@ -767,13 +902,21 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                     return next;
                   });
                 }}
+                onDragOver={(e) => { 
+                  if (canEdit && e.dataTransfer.types.includes('text/question-id')) e.preventDefault(); 
+                }}
+                onDrop={(e) => {
+                  const targetCatId = pages[Math.max(0, selectedPageIndex - 1)]?.id;
+                  const qId = e.dataTransfer.getData('text/question-id');
+                  if (targetCatId && qId) handleQuestionDrop(qId, targetCatId);
+                }}
                 sx={{
                   position: 'fixed',
-                  left: viewerMode === 'teacher' && showStudentsSidebar ? '340px' : '20px',
+                  left: '20px',
                   top: '55%',
                   transform: 'translateY(-50%)',
                   bgcolor: 'background.paper',
-                  border: '1px solid rgba(0,0,0,0.12)',
+                  border: '1px solid rgba(0,0,0,0.08)',
                   boxShadow: 'none',
                   zIndex: 10, // Très bas pour passer sous les paramètres
                   p: 2.5,
@@ -796,6 +939,14 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                     setSelectedCategoryId(p && p.id ? p.id : null);
                     return next;
                   });
+                }}
+                onDragOver={(e) => { 
+                  if (canEdit && e.dataTransfer.types.includes('text/question-id')) e.preventDefault(); 
+                }}
+                onDrop={(e) => {
+                  const targetCatId = pages[Math.min(pages.length - 1, selectedPageIndex + 1)]?.id;
+                  const qId = e.dataTransfer.getData('text/question-id');
+                  if (targetCatId && qId) handleQuestionDrop(qId, targetCatId);
                 }}
                 sx={{
                   position: 'fixed',
@@ -838,7 +989,30 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               }}
             >
               {slots.map((p, i) => (
-                <Box key={p ? p.question.id : `slot-${i}`} sx={{ minHeight: 210, height: '100%', '& .MuiCard-root': { height: '100%' } }}>
+                <Box 
+                  key={p ? p.question.id : `slot-${i}`} 
+                  draggable={canEdit && !!p}
+                  onDragStart={(e) => {
+                    if (canEdit && p) {
+                      setDraggedQuestionId(p.question.id);
+                      e.dataTransfer.setData('text/question-id', p.question.id.toString());
+                      e.dataTransfer.effectAllowed = 'move';
+                    }
+                  }}
+                  onDragEnd={() => {
+                    setDraggedQuestionId(null);
+                    setDragOverTarget(null);
+                  }}
+                  onDragOver={(e) => {
+                    if (canEdit && e.dataTransfer.types.includes('text/question-id')) { e.preventDefault(); setDragOverTarget(i); }
+                  }}
+                  onDragLeave={() => setDragOverTarget(null)}
+                  onDrop={(e) => {
+                    const qId = e.dataTransfer.getData('text/question-id');
+                    handleQuestionDrop(qId, selectedCategoryId, i);
+                  }}
+                  sx={{ minHeight: 210, height: '100%', '& .MuiCard-root': { height: '100%', outline: (dragOverTarget === i && draggedQuestionId) ? '2px dashed #6167bd' : 'none' } }}
+                >
                   {p ? (
                     <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={!canEdit} onAnswerChange={handleAnswerChange} externalAnswer={collectedAnswers && (collectedAnswers[p.question.id] || collectedAnswers[`ans_q${p.question.id}`])} />
                   ) : (canAddQuestion && i === addSlotIndex) ? (
@@ -846,7 +1020,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                       onClick={() => addQuestionToCategory(selectedCategoryId)}
                       sx={{
                         border: '1px dashed rgba(0,0,0,0.12)',
-                        borderRadius: 2,
+                        borderRadius: 3,
                         height: '100%',
                         minHeight: 210,
                         display: 'flex',
@@ -886,7 +1060,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 p: 0.2,
                 pr: 0.2,
                 pb: 0.4,
-                borderRadius: 999,
+                borderRadius: 50, // Use 50 for a perfect circle with width/height 52
                 bgcolor: 'background.paper',
                 border: '1px solid rgba(0,0,0,0.10)',
                 boxShadow: 'none',
@@ -933,7 +1107,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               alignItems: 'center',
               gap: 0.5,
               p: 1,
-              borderRadius: 999,
+              borderRadius: 50, // Use 50 for a perfect circle with width/height 52
               bgcolor: 'background.paper',
               border: '1px solid rgba(0,0,0,0.10)',
               boxShadow: 'none',
@@ -952,18 +1126,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 </IconButton>
               </span>
             </Tooltip>
-            <Tooltip title="Aperçu étudiant">
-              <span>
-                <IconButton
-                  size="large"
-                  disabled={!selectedCategoryId}
-                  onClick={() => openPreview('student')}
-                  sx={{ width: 52, height: 52 }}
-                >
-                  <SchoolIcon />
-                </IconButton>
-              </span>
-            </Tooltip>
           </Paper>
 
         </Box>
@@ -976,7 +1138,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           sx: {
             width: { xs: '100%', sm: 380 },
             maxWidth: '100%',
-            borderRadius: 0,
+            borderRadius: '28px 0 0 28px', // Material 3 Standard
             boxShadow: 'none',
             borderLeft: '1px solid rgba(0,0,0,0.10)',
             bgcolor: 'background.paper',
@@ -997,6 +1159,39 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           <Divider />
 
           <Stack spacing={2.25} sx={{ p: 2 }}>
+            {/* Session Selector */}
+            <FormControl fullWidth size="small">
+              <InputLabel id="session-select-label">Session sélectionnée</InputLabel>
+              <Select
+                labelId="session-select-label"
+                label="Session sélectionnée"
+                value={selectedSessionId || ''}
+                onChange={(e) => setSelectedSessionId(e.target.value)}
+              >
+                {sessionDetails.map(s => (
+                  <MenuItem key={s.id} value={s.id}>{s.name} {s.active ? '• Ouverte' : '• Fermée'}</MenuItem>
+                ))}
+                {sessionDetails.length === 0 && <MenuItem disabled>Aucune session disponible</MenuItem>}
+              </Select>
+            </FormControl>
+
+            <Divider />
+
+            {/* Manage Sessions Button */}
+            {isAdmin && (
+              <Button
+                variant="outlined"
+                fullWidth
+                onClick={openSessionsDialog}
+                startIcon={<SettingsIcon />}
+                sx={{ borderRadius: 100, textTransform: 'none', fontWeight: 600, py: 1.2 }}
+              >
+                Gérer les participants & sessions
+              </Button>
+            )}
+
+            <Divider />
+
             <TextField
               label="Note maximale"
               type="number"
@@ -1011,8 +1206,9 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 const nextValue = raw === '' ? 0 : parseFloat(raw);
                 updateQuestionnaireSettings({ maxScore: Number.isNaN(nextValue) ? 0 : nextValue });
               }}
-              inputProps={{ min: 0, step: 0.1 }}
+              inputProps={{ min: 0, step: "any" }}
               fullWidth
+              sx={{ '& .MuiOutlinedInput-root': { borderRadius: '16px' } }}
             />
 
             <FormControl fullWidth size="small">
@@ -1022,25 +1218,84 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 label="Type de note global"
                 value={questionnaire?.gradingMode || 'points'}
                 onChange={(event) => updateQuestionnaireSettings({ gradingMode: event.target.value })}
+                MenuProps={{
+                  slotProps: {
+                    paper: {
+                      sx: {
+                        borderRadius: '20px',
+                        mt: 1,
+                        p: 0.4,
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.1)'
+                      }
+                    }
+                  },
+                  MenuListProps: { sx: { py: 0.5 } }
+                }}
               >
-                <MenuItem value="points">Points</MenuItem>
-                <MenuItem value="coefficient">Coefficients</MenuItem>
-                <MenuItem value="percentage">Pourcentage</MenuItem>
+                <MenuItem value="points" sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Points</MenuItem>
+                <MenuItem value="coefficient" sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Coefficients</MenuItem>
+                <MenuItem value="percentage" sx={{ borderRadius: '100px', mx: 0.5, py: 0.8, px: 1.5 }}>Pourcentage</MenuItem>
               </Select>
             </FormControl>
 
+            {isAdmin && selectedCategory && (
+              <>
+                <Divider sx={{ my: 1 }} />
+                {(() => {
+                  const otherCeilingsSum = (questionnaire?.categories || [])
+                    .filter(c => c.id !== selectedCategoryId)
+                    .reduce((sum, cat) => sum + Number(cat.currentNote || 0), 0);
+                  const maxScoreValue = Number(questionnaire?.maxScore || 20);
+                  const maxAllowed = Math.max(0, maxScoreValue - otherCeilingsSum);
+                  const currentVal = Number(selectedCategory.currentNote || 0);
 
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={!!questionnaire?.openForStudents}
-                  onChange={(event) => updateQuestionnaireSettings({ openForStudents: event.target.checked })}
-                />
-              }
-              label="Questionnaire ouvert aux étudiants"
-              sx={{ mx: 0, justifyContent: 'space-between', '& .MuiFormControlLabel-label': { fontSize: 14 } }}
-              labelPlacement="start"
-            />
+                  return (
+                    <>
+                      <Typography sx={{ px: 2, mb: 1.5, fontSize: 10, fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1.2 }}>
+                        Plafond de points ({selectedCategory.title})
+                      </Typography>
+                      <Box sx={{ px: 2, pb: 1 }}>
+                        <TextField
+                          label="Limite pour cette catégorie"
+                          type="number"
+                          size="small"
+                          value={selectedCategory.currentNote ?? 0}
+                          onChange={(e) => {
+                            const raw = e.target.value === '' ? 0 : parseFloat(e.target.value);
+                            const val = Math.min(raw, maxAllowed);
+                            setQuestionnaire(prev => {
+                              if (!prev) return prev;
+                              return {
+                                ...prev,
+                                categories: prev.categories.map(c => 
+                                  c.id === selectedCategoryId ? { ...c, currentNote: val } : c
+                                )
+                              };
+                            });
+                          }}
+                          onBlur={(e) => {
+                            const raw = parseFloat(e.target.value) || 0;
+                            const val = Math.min(raw, maxAllowed);
+                            updateCategoryApi(selectedCategoryId, { currentNote: val });
+                          }}
+                          inputProps={{ step: "any", min: 0, max: maxAllowed }}
+                          fullWidth
+                          helperText={
+                            maxAllowed === 0 
+                            ? "Budget épuisé par les autres catégories."
+                            : currentVal >= maxAllowed && maxScoreValue > 0 && questionnaire?.categories?.length > 1
+                              ? `Limite de budget atteinte (${maxAllowed} pts restants)`
+                              : `Budget max pour cette catégorie : ${maxAllowed}`
+                          }
+                          error={maxAllowed === 0}
+                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '16px' } }}
+                        />
+                      </Box>
+                    </>
+                  );
+                })()}
+              </>
+            )}
 
             <FormControlLabel
               control={
@@ -1050,18 +1305,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 />
               }
               label="Afficher le résultat après réponse"
-              sx={{ mx: 0, justifyContent: 'space-between', '& .MuiFormControlLabel-label': { fontSize: 14 } }}
-              labelPlacement="start"
-            />
-
-            <FormControlLabel
-              control={
-                <Switch
-                  checked={!!questionnaire?.shuffleQuestions}
-                  onChange={(event) => updateQuestionnaireSettings({ shuffleQuestions: event.target.checked })}
-                />
-              }
-              label="Mélanger les questions"
               sx={{ mx: 0, justifyContent: 'space-between', '& .MuiFormControlLabel-label': { fontSize: 14 } }}
               labelPlacement="start"
             />
@@ -1089,32 +1332,54 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         open={!!previewMode}
         onClose={() => setPreviewMode(null)}
         TransitionComponent={Transition}
-        PaperProps={{ sx: { bgcolor: 'background.default' } }}
+        PaperProps={{ sx: { bgcolor: 'background.default', borderRadius: 7 } }}
       >
 
         <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-          <Box sx={{ px: 2, py: 1.5 }}>
+          <Box>
             <TopAppBar
               pages={pages}
               selectedPage={selectedPageIndex}
               onSelectPage={selectPage}
-              title={questionnaire && questionnaire.title}
+              title={questionnaire?.title}
               onTitleChange={undefined}
               onAddCategory={undefined}
               date={questionnaire?.date}
               onDateChange={undefined}
               centerActions={previewMode === 'teacher' ? (
-                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.12)', px: 2, py: 0.75, borderRadius: 2 }}>
-                  <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
-                  <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${'—'} / ${questionnaire?.maxScore ?? 20}`}</Typography>
-                </Box>
-              ) : null}
+                  <Paper 
+                    elevation={0}
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 1.25,
+                      p: 0.75,
+                      px: 2,
+                      borderRadius: 4,
+                      bgcolor: 'background.paper',
+                      border: '1px solid rgba(0,0,0,0.10)',
+                      boxShadow: 'none',
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+                      <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
+                      <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore ?? '—'} / ${questionnaire?.maxScore ?? 20}`}</Typography>
+                    </Box>
+                    {selectedStudentId && (
+                      <Tooltip title="Enregistrer la note">
+                        <IconButton onClick={saveSubmission} color="primary" sx={{ width: 36, height: 36 }}><SaveIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                    )}
+                  </Paper>
+                ) : null}
               rightActions={<IconButton size="small" onClick={() => setPreviewMode(null)}><CloseIcon fontSize="small" /></IconButton>}
               hideDashboardLink={true}
             />
           </Box>
 
-          <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'stretch', gap: 1, flex: 1, pt: '76px', minHeight: 0 }}>
+          <Box sx={{ display: 'flex', alignItems: 'stretch', gap: 0, flex: 1, pt: '76px', minHeight: 0, position: 'relative' }}>
+            {previewMode === 'teacher' && renderStudentsSidebar()}
+            
             <Box sx={{ flex: 1, overflow: 'hidden', pr: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
               {error && (
                 <Box sx={{ px: 2, pt: 1 }}>
@@ -1155,7 +1420,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                     top: 'calc(76px + (100vh - 76px) / 2)',
                     transform: 'translate(-50%, -50%)',
                     bgcolor: 'background.paper',
-                    border: '1px solid rgba(0,0,0,0.08)',
+                    border: '1px solid rgba(0,0,0,0.08)', // Keep as is
                     zIndex: 1200,
                     p: 2
                   }}
@@ -1180,7 +1445,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                     top: 'calc(76px + (100vh - 76px) / 2)',
                     transform: 'translate(50%, -50%)',
                     bgcolor: 'background.paper',
-                    border: '1px solid rgba(0,0,0,0.08)',
+                    border: '1px solid rgba(0,0,0,0.08)', // Keep as is
                     zIndex: 1200,
                     p: 2
                   }}
@@ -1191,7 +1456,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 {slots.map((p, i) => (
                   <Box key={p ? p.question.id : `slot-${i}`} sx={{ minHeight: 210, height: '100%' }}>
                     {p ? (
-                      <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={true} onAnswerChange={handleAnswerChange} />
+                      <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={true} onAnswerChange={handleAnswerChange} /> // QuestionComponent handles its own style
                     ) : (
                       <Box sx={{ border: '1px dashed rgba(0,0,0,0.06)', borderRadius: 2, height: '100%', minHeight: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary', bgcolor: 'transparent' }} />
                     )}
@@ -1203,6 +1468,12 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           </Box>
         </Box>
       </Dialog>
+
+      <Snackbar open={snackbar.open} autoHideDuration={4000} onClose={() => setSnackbar({ ...snackbar, open: false })} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}>
+        <Alert onClose={() => setSnackbar({ ...snackbar, open: false })} severity={snackbar.severity} variant="filled" sx={{ width: '100%', borderRadius: '12px', fontWeight: 600 }}>
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </>
   )
 

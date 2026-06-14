@@ -1,58 +1,35 @@
-import React, { useEffect, useState } from 'react'
-import {
-  Box, Paper, Typography, Table, TableBody, TableCell, TableHead, TableRow,
-  Button, TextField, Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment,
-  IconButton, Switch, Tooltip, Chip, FormControlLabel
-} from '@mui/material'
-import SearchIcon from '@mui/icons-material/Search'
-import AddIcon from '@mui/icons-material/Add'
+import React, { useEffect, useState, useMemo } from 'react'
+import { Box, Paper, Typography, TextField, IconButton, Checkbox, Button, Dialog, DialogTitle, DialogContent, DialogActions, Tooltip, FormControlLabel, Select, MenuItem } from '@mui/material'
 import EditIcon from '@mui/icons-material/Edit'
-import { listStudents, createStudent, updateStudent, generateStudentPassword } from '../api/students.js'
-import { listTeachers } from '../api/teachers.js'
-import { useNavigate } from 'react-router-dom'
+import DeleteIcon from '@mui/icons-material/Delete'
+import { apiJson } from '../api/http.js'
 
 export default function StudentsView() {
   const [students, setStudents] = useState([])
-  
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [user, setUser] = useState(null)
-  const navigate = useNavigate()
+  const [selectedIds, setSelectedIds] = useState([])
+  const [editOpen, setEditOpen] = useState(false)
+  const [editingStudent, setEditingStudent] = useState(null)
+  const [editPrenom, setEditPrenom] = useState('')
+  const [editNom, setEditNom] = useState('')
+  const [editEmail, setEditEmail] = useState('')
+  const [editYear, setEditYear] = useState('')
+  const [editGroup, setEditGroup] = useState('')
+  const [sortBy, setSortBy] = useState('year')
 
-  // UI state
-  const [filter, setFilter] = useState('')
-  const [addOpen, setAddOpen] = useState(false)
-  const [newEmail, setNewEmail] = useState('')
-  const [newIsTest, setNewIsTest] = useState(false)
-  const [editingId, setEditingId] = useState(null)
-  const [editingNom, setEditingNom] = useState('')
-  const [editingPrenom, setEditingPrenom] = useState('')
+  // UI state for delete confirmation
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false)
+  const [deleteTargetIds, setDeleteTargetIds] = useState([])
+
+  const [error, setError] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   async function load() {
     setLoading(true)
-    setError(null)
     try {
-      const [sJson, tJson] = await Promise.all([
-        listStudents(),
-        listTeachers(),
-      ])
-      setStudents(sJson)
-      // determine admin status from teachers list and current user
-      const raw = localStorage.getItem('authUser')
-      let current = null
-      if (raw) {
-        try { current = JSON.parse(raw) } catch (e) { current = null }
-      }
-      setUser(current)
-      if (current && Array.isArray(tJson)) {
-        const me = tJson.find(t => t.id === current.id)
-        setIsAdmin(!!(me && me.admin))
-      } else {
-        setIsAdmin(false)
-      }
+      const data = await apiJson('/api/students')
+      setStudents(data)
     } catch (err) {
-      setError(err.message)
+      setError('Impossible de charger les étudiants')
     } finally {
       setLoading(false)
     }
@@ -60,228 +37,214 @@ export default function StudentsView() {
 
   useEffect(() => { load() }, [])
 
-  // generate/reset password (admin only)
-  const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
-  const [generatedPassword, setGeneratedPassword] = useState(null)
-  const [generatedFor, setGeneratedFor] = useState(null)
+  const handleEditStudent = (s) => {
+    setEditingStudent(s)
+    setEditPrenom(s.prenom || '')
+    setEditNom(s.nom || '')
+    setEditEmail(s.email || '')
+    setEditYear(s.year || '')
+    setEditGroup(s.group || '')
+    setEditOpen(true)
+  }
 
-  async function handleGeneratePassword(student) {
+  const handleUpdateStudent = async () => {
     try {
-      const resp = await generateStudentPassword(student.id)
-      const pass = resp && resp.password ? resp.password : null
-      setGeneratedPassword(pass)
-      setGeneratedFor(student.email)
-      setPasswordDialogOpen(true)
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  function startEditing(student) {
-    setEditingId(student.id)
-    setEditingNom(student.nom || '')
-    setEditingPrenom(student.prenom || '')
-  }
-
-  async function saveEditing() {
-    if (editingId === null) return
-    try {
-      // Update student with new nom/prenom via API
-      await updateStudent(editingId, { nom: editingNom, prenom: editingPrenom })
-      const studentIndex = students.findIndex(s => s.id === editingId)
-      if (studentIndex !== -1) {
-        students[studentIndex].nom = editingNom
-        students[studentIndex].prenom = editingPrenom
-        setStudents([...students])
-      }
-      setEditingId(null)
-      setEditingNom('')
-      setEditingPrenom('')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  function cancelEditing() {
-    setEditingId(null)
-    setEditingNom('')
-    setEditingPrenom('')
-  }
-
-  async function handleCreateStudent() {
-    if (!newEmail) return
-    try {
-      await createStudent({ email: newEmail, isTest: newIsTest })
-      setNewEmail('')
-      setNewIsTest(false)
-      setAddOpen(false)
+      await apiJson(`/api/students/${editingStudent.id}`, {
+        method: 'PUT',
+        json: {
+          prenom: editPrenom,
+          nom: editNom,
+          email: editEmail,
+          year: editYear,
+          group: editGroup
+        }
+      })
+      setEditOpen(false)
       await load()
     } catch (err) {
-      setError(err.message)
+      setError('Erreur lors de la sauvegarde')
     }
   }
 
-  async function toggleTest(student) {
+  const askDelete = (ids) => {
+    setDeleteTargetIds(ids)
+    setConfirmDeleteOpen(true)
+  }
+
+  const handleDeleteSelected = async () => {
     try {
-      await updateStudent(student.id, { isTest: !student.isTest })
-      // update local state
-      const idx = students.findIndex(s => s.id === student.id)
-      if (idx !== -1) {
-        const copy = [...students]
-        copy[idx].isTest = !student.isTest
-        setStudents(copy)
-      }
+      await apiJson('/api/students', {
+        method: 'DELETE',
+        json: { ids: deleteTargetIds }
+      })
+      setConfirmDeleteOpen(false)
+      setDeleteTargetIds([])
+      setSelectedIds([])
+      load()
     } catch (err) {
-      setError(err.message)
+      setError('Erreur lors de la suppression')
     }
   }
 
-  const filtered = students
-    .filter(s => s.email.toLowerCase().includes(filter.toLowerCase()))
-    .sort((a, b) => (b.isTest ? 1 : 0) - (a.isTest ? 1 : 0))
+  const toggleSelectAll = () => {
+    if (selectedIds.length === students.length) setSelectedIds([])
+    else setSelectedIds(students.map(s => s.id))
+  }
+
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id])
+  }
+
+  const hasMultipleYears = useMemo(() => {
+    const years = new Set(students.map(s => s.year).filter(Boolean))
+    return years.size > 1
+  }, [students])
+
+  const { sortedYears, groupedStudents } = useMemo(() => {
+    const base = [...students].sort((a, b) => {
+      const nameA = `${a.nom || ''} ${a.prenom || ''}`.toLowerCase()
+      const nameB = `${b.nom || ''} ${b.prenom || ''}`.toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+
+    if (sortBy === 'name') {
+      return {
+        sortedYears: ['Liste alphabétique'],
+        groupedStudents: { 'Liste alphabétique': base }
+      }
+    }
+
+    const groups = base.reduce((acc, s) => {
+      const yearLabel = s.year ? `Année ${s.year}` : 'Année non spécifiée'
+      if (!acc[yearLabel]) acc[yearLabel] = []
+      acc[yearLabel].push(s)
+      return acc
+    }, {})
+
+    return {
+      sortedYears: Object.keys(groups).sort(),
+      groupedStudents: groups
+    }
+  }, [students, sortBy])
+
+  if (loading) return <Typography sx={{ p: 2 }}>Chargement...</Typography>
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-        <Box sx={{ display: 'flex', gap: 1 }}>
-          <TextField
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2, gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <FormControlLabel
+            control={<Checkbox size="small" checked={students.length > 0 && selectedIds.length === students.length} indeterminate={selectedIds.length > 0 && selectedIds.length < students.length} onChange={toggleSelectAll} />}
+            label={<Typography sx={{ fontSize: 14, fontWeight: 600 }}>Tout sélectionner</Typography>}
+            sx={{ ml: 0.5 }}
+          />
+          {selectedIds.length > 0 && (
+            <Button variant="contained" color="error" disableElevation startIcon={<DeleteIcon />} onClick={() => askDelete(selectedIds)} sx={{ textTransform: 'none', borderRadius: 100, py: 0.5, px: 2 }}>
+              Supprimer ({selectedIds.length})
+            </Button>
+          )}
+        </Box>
+
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography sx={{ fontSize: 13, color: 'text.secondary', fontWeight: 500 }}>Trier par :</Typography>
+          <Select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
             size="small"
-            placeholder="Rechercher..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            InputProps={{ startAdornment: (<InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment>) }}
-            sx={{ width: 220 }}
-          /> 
-          <Button variant="text" startIcon={<AddIcon />} onClick={() => setAddOpen(true)}>Ajouter</Button>
+            sx={{ 
+              height: 32, 
+              fontSize: 13, 
+              borderRadius: 100, 
+              bgcolor: 'rgba(0,0,0,0.03)',
+              '& .MuiOutlinedInput-notchedOutline': { border: 'none' },
+              '&:hover .MuiOutlinedInput-notchedOutline': { border: 'none' },
+              '&.Mui-focused .MuiOutlinedInput-notchedOutline': { border: 'none' },
+            }}
+          >
+            <MenuItem value="year">Année</MenuItem>
+            <MenuItem value="name">Nom</MenuItem>
+          </Select>
         </Box>
       </Box>
 
-      <Paper sx={{ p: 2, borderRadius: 2, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.06)', background: '#fff', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
-        {error && <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>}
+      <Paper sx={{ p: 1.5, borderRadius: 6, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.08)', background: '#fff', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+        {error && <Typography color="error" sx={{ mb: 1 }}>{error}</Typography>}
 
-        {loading ? (
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1 }}>
-            <Typography>Chargement...</Typography>
-          </Box>
-        ) : (
-          filtered.length === 0 ? (
-            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Typography color="text.secondary">La liste des étudiants est vide.</Typography>
-            </Box>
+        <Box sx={{ 
+          flex: 1, 
+          overflowY: 'auto', 
+          p: 1,
+          '&::-webkit-scrollbar': { width: '4px' },
+          '&::-webkit-scrollbar-track': { background: 'transparent' },
+          '&::-webkit-scrollbar-thumb': { 
+            background: 'rgba(0, 0, 0, 0.05)', 
+            borderRadius: '10px',
+            '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+          }
+        }}>
+          {students.length === 0 ? (
+            <Typography sx={{ color: 'text.secondary', textAlign: 'center', mt: 4, fontWeight: 500 }}>Aucun étudiant trouvé</Typography>
           ) : (
-            <Box sx={{ overflowX: 'auto', flex: 1, minWidth: 0 }}>
-              <Table size="medium" sx={{ minWidth: 0, width: '100%', '& .MuiTableCell-root': { py: 1.5 } }}>
-                <TableHead>
-                  <TableRow>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Test</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Nom</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Prénom</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Email</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Accès</TableCell>
-                    <TableCell sx={{ fontWeight: 600, py: 2 }}>Actions</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {filtered.map(s => (
-                    <TableRow key={s.id} hover>
-                      <TableCell sx={{ py: 1.5 }}>
-                        {s.isTest && (
-                          <Chip label="Test" size="small" color="secondary" variant="outlined" sx={{ fontSize: 10, fontWeight: 700 }} />
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ py: 1.5 }}>
-                        {editingId === s.id ? (
-                          <TextField
-                            size="small"
-                            value={editingNom}
-                            onChange={(e) => setEditingNom(e.target.value)}
-                            sx={{ width: 120 }}
-                          />
-                        ) : (
-                          s.nom || '—'
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ py: 1.5 }}>
-                        {editingId === s.id ? (
-                          <TextField
-                            size="small"
-                            value={editingPrenom}
-                            onChange={(e) => setEditingPrenom(e.target.value)}
-                            sx={{ width: 120 }}
-                          />
-                        ) : (
-                          s.prenom || '—'
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ py: 1.5 }}>{s.email}</TableCell>
-                      <TableCell sx={{ py: 1.5 }}>
-                        {isAdmin ? (
-                          <Button size="small" variant="outlined" onClick={() => handleGeneratePassword(s)} sx={{ textTransform: 'none' }}>Générer mot de passe</Button>
-                        ) : (
-                          <Typography sx={{ color: 'text.secondary' }}>—</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ py: 1.5 }}>
-                        {editingId === s.id ? (
-                          <Box sx={{ display: 'flex', gap: 0.5 }}>
-                            <Button size="small" variant="text" onClick={saveEditing}>Sauvegarder</Button>
-                            <Button size="small" variant="text" onClick={cancelEditing}>Annuler</Button>
-                          </Box>
-                        ) : (
-                          <Box sx={{ display: 'flex', gap: 0.5, alignItems: 'center' }}>
-                            <Tooltip title="Éditer">
-                              <IconButton size="small" onClick={() => startEditing(s)}>
-                                <EditIcon fontSize="small" />
-                              </IconButton>
-                            </Tooltip>
-                            {isAdmin && (
-                              <Button size="small" variant="text" onClick={() => navigate(`/admin/student/${s.id}/results`)} sx={{ textTransform: 'none' }}>Résultats</Button>
-                            )}
-                            <Box sx={{ flex: 1 }} />
-                            <Tooltip title={s.isTest ? "Retirer mode test" : "Marquer comme test"}>
-                              <Switch size="small" checked={!!s.isTest} onChange={() => toggleTest(s)} />
-                            </Tooltip>
-                          </Box>
-                        )}
-                      </TableCell>
-                    </TableRow>
+            sortedYears.map(year => (
+              <Box key={year} sx={{ mb: 4 }}>
+                <Typography sx={{ fontWeight: 800, mb: 1.5, color: '#1a1a1b', fontSize: 15, letterSpacing: -0.2 }}>{year}</Typography>
+                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                  {groupedStudents[year].map(s => (
+                    <Box key={s.id} sx={{ p: 1.5, borderRadius: 4, bgcolor: 'rgba(0,0,0,0.02)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 2, border: '1px solid transparent', '&:hover': { bgcolor: 'rgba(0,0,0,0.04)', borderColor: 'rgba(0,0,0,0.05)' } }}>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                        <Checkbox size="small" checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
+                        <Box>
+                          <Typography sx={{ fontSize: 14, fontWeight: 600, color: '#1a1a1b' }}>{s.nom} {s.prenom}</Typography>
+                          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{s.email} {s.group ? `• Groupe ${s.group}` : ''}</Typography>
+                        </Box>
+                      </Box>
+                      <Box sx={{ display: 'flex', gap: 0.5 }}>
+                        <Tooltip title="Modifier">
+                          <IconButton size="small" color="primary" onClick={() => handleEditStudent(s)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                        <Tooltip title="Supprimer">
+                          <IconButton size="small" color="error" onClick={() => askDelete([s.id])}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </Box>
                   ))}
-                </TableBody>
-              </Table>
-            </Box>
-          )
-        )}
+                </Box>
+              </Box>
+            ))
+          )}
+        </Box>
       </Paper>
 
-      <Dialog open={addOpen} onClose={() => setAddOpen(false)}>
-        <DialogTitle>Ajouter un étudiant</DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: 420 }}>
-          <FormControlLabel
-            control={
-              <Switch checked={newIsTest} onChange={(e) => setNewIsTest(e.target.checked)} />
-            }
-            label="Marquer comme compte de test"
-            sx={{ mb: 1 }}
-          />
-          <TextField label="Email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} fullWidth />
+      <Dialog open={editOpen} onClose={() => setEditOpen(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ color: '#1a1a1b', fontWeight: 700 }}>Modifier l'étudiant</DialogTitle>
+        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: 400, pt: 1 }}>
+          <TextField label="Prénom" value={editPrenom} onChange={(e) => setEditPrenom(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }} />
+          <TextField label="Nom" value={editNom} onChange={(e) => setEditNom(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }} />
+          <TextField label="Email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }} />
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <TextField label="Année" value={editYear} onChange={(e) => setEditYear(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }} />
+            <TextField label="Groupe" value={editGroup} onChange={(e) => setEditGroup(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }} />
+          </Box>
         </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAddOpen(false)}>Annuler</Button>
-          <Button variant="text" onClick={handleCreateStudent}>Ajouter</Button>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setEditOpen(false)} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Annuler</Button>
+          <Button variant="contained" onClick={handleUpdateStudent} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Enregistrer</Button>
         </DialogActions>
       </Dialog>
 
-      <Dialog open={passwordDialogOpen} onClose={() => setPasswordDialogOpen(false)}>
-        <DialogTitle>Mot de passe généré</DialogTitle>
-        <DialogContent sx={{ display: 'flex', flexDirection: 'column', gap: 2, width: 420 }}>
-          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Utilisateur: {generatedFor || '—'}</Typography>
-          <TextField label="Mot de passe" value={generatedPassword || ''} fullWidth InputProps={{ readOnly: true }} />
+      <Dialog open={confirmDeleteOpen} onClose={() => setConfirmDeleteOpen(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ color: '#1a1a1b', fontWeight: 700 }}>Confirmation de suppression</DialogTitle>
+        <DialogContent>
+          <Typography>Voulez-vous vraiment supprimer {deleteTargetIds.length > 1 ? `ces ${deleteTargetIds.length} étudiants` : "cet étudiant"} ?</Typography>
+          <Typography variant="caption" color="error" sx={{ mt: 1, display: 'block' }}>Cette action est irréversible et supprimera toutes les notes associées.</Typography>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => {
-            if (generatedPassword && navigator && navigator.clipboard) navigator.clipboard.writeText(generatedPassword)
-          }}>Copier</Button>
-          <Button onClick={() => setPasswordDialogOpen(false)}>Fermer</Button>
+          <Button onClick={() => setConfirmDeleteOpen(false)} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Annuler</Button>
+          <Button color="error" variant="contained" disableElevation onClick={handleDeleteSelected} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Supprimer</Button>
         </DialogActions>
       </Dialog>
     </Box>

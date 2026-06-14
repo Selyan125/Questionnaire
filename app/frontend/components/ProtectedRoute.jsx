@@ -12,16 +12,5 @@ export default function ProtectedRoute({ children }) {
   const location = useLocation()
   const pathname = location.pathname || ''
 
-  // Students must not access the admin/dashboard area. Redirect them to /student landing.
-  const isStudent = user && (user.role === 'student' || user.role === 'etudiant' || user.role === 'élève')
-  if (isStudent) {
-    // allow questionnaire pages and public pages
-    if (pathname.startsWith('/questionnaire') || pathname.startsWith('/login') || pathname === '/student') {
-      return children
-    }
-    // otherwise redirect to student landing
-    return <Navigate to="/student" replace />
-  }
-
   return children
 }

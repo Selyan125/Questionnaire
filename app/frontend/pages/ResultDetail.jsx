@@ -45,11 +45,11 @@ export default function ResultDetail(){
         <Button variant="text" onClick={() => navigate('/dashboard')}>Retour</Button>
       </Box>
 
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: 2, borderRadius: 5, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.08)' }}>
         {loading ? <Typography>Chargement...</Typography> : error ? <Typography color="error">{error}</Typography> : (
           <>
             {result && result.student && (
-              <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 1, border: '1px solid rgba(0,0,0,0.06)' }}>
+              <Box sx={{ mb: 3, p: 2, bgcolor: 'background.paper', borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)' }}>
                 <Typography sx={{ fontWeight: 700 }}>Étudiant</Typography>
                 <Typography>{result.student.nom} {result.student.prenom}</Typography>
                 <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{result.student.email}</Typography>

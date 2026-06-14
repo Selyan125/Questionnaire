@@ -19,26 +19,26 @@ router.post('/import', requireAdmin, async (req, res) => {
         if (existingStudent) {
           await prisma.student.update({
             where: { id: existingStudent.id },
-            data: { nom, prenom, isTest: !!isTest },
+            data: { nom, prenom, year: userData.year, group: userData.group },
           });
           results.push({ email, status: 'updated', message: 'Étudiant mis à jour' });
         } else {
           await prisma.student.create({
-            data: { email, password: hashedPassword, nom, prenom, isTest: !!isTest },
+            data: { email, nom, prenom, year: userData.year, group: userData.group }, // Ajout de year et group
           });
-          results.push({ email, status: 'created', password: generatedPassword, message: 'Étudiant créé' });
+          results.push({ email, status: 'created', message: 'Étudiant créé' });
         }
       } else if (targetRole === 'teacher') {
         const existingTeacher = await prisma.teacher.findUnique({ where: { email } });
         if (existingTeacher) {
           await prisma.teacher.update({
             where: { id: existingTeacher.id },
-            data: { nom, prenom }, 
+            data: { name: nom, lastName: prenom }, 
           });
           results.push({ email, status: 'updated', message: 'Enseignant mis à jour' });
         } else {
           await prisma.teacher.create({
-            data: { email, password: hashedPassword, nom, prenom },
+            data: { email, password: hashedPassword, name: nom, lastName: prenom },
           });
           results.push({ email, status: 'created', password: generatedPassword, message: 'Enseignant créé' });
         }
@@ -70,6 +70,8 @@ router.post('/import-all', requireAdmin, async (req, res) => {
             await tx.teacher.update({
               where: { id: existingTeacher.id },
               data: {
+                name: teacherData.name,
+                lastName: teacherData.lastName,
                 admin: teacherData.admin,
                 jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
               },
@@ -81,6 +83,8 @@ router.post('/import-all', requireAdmin, async (req, res) => {
             await tx.teacher.create({
               data: {
                 email: teacherData.email,
+                name: teacherData.name,
+                lastName: teacherData.lastName,
                 password: hashedPassword,
                 admin: teacherData.admin,
                 jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
@@ -103,20 +107,19 @@ router.post('/import-all', requireAdmin, async (req, res) => {
               data: {
                 nom: studentData.nom,
                 prenom: studentData.prenom,
-                isTest: studentData.isTest,
+                year: studentData.year,
+                group: studentData.group,
               },
             });
             importSummary.students.updated++;
           } else {
-            const newPassword = generatePassword();
-            const hashedPassword = await hashPassword(newPassword);
             await tx.student.create({
               data: {
                 email: studentData.email,
-                password: hashedPassword,
                 nom: studentData.nom,
                 prenom: studentData.prenom,
-                isTest: studentData.isTest,
+                year: studentData.year, // Ajout du champ 'year'
+                group: studentData.group,
               },
             });
             importSummary.students.created++;
@@ -145,7 +148,7 @@ router.post('/import-all', requireAdmin, async (req, res) => {
                 shuffleQuestions: qData.shuffleQuestions,
                 date: qData.date ? new Date(qData.date) : null,
                 juryGroups: typeof qData.juryGroups === 'object' ? JSON.stringify(qData.juryGroups) : qData.juryGroups,
-                sessions: typeof qData.sessions === 'object' ? JSON.stringify(qData.sessions) : qData.sessions,
+                // Removed 'sessions' assignment because it is a relation (Session[]) in schema.prisma
               },
             });
             importSummary.questionnaires.updated++;
@@ -165,7 +168,7 @@ router.post('/import-all', requireAdmin, async (req, res) => {
                 shuffleQuestions: qData.shuffleQuestions,
                 date: qData.date ? new Date(qData.date) : null,
                 juryGroups: typeof qData.juryGroups === 'object' ? JSON.stringify(qData.juryGroups) : qData.juryGroups,
-                sessions: typeof qData.sessions === 'object' ? JSON.stringify(qData.sessions) : qData.sessions,
+                // Removed 'sessions' assignment because it is a relation (Session[]) in schema.prisma
               },
             });
             questionnaireId = newQuestionnaire.id;

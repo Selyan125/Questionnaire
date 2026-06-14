@@ -1,0 +1,38 @@
+{
+  "entry": [
+    "app/frontend/main.jsx",
+    "app/backend/index.js"
+  ],
+  "ignoreUnresolved": [
+    [
+      "aws-sdk",
+      [
+        "app\\backend\\node_modules\\@mapbox\\node-pre-gyp\\lib\\util\\s3_setup.js"
+      ]
+    ],
+    [
+      "mock-aws-s3",
+      [
+        "app\\backend\\node_modules\\@mapbox\\node-pre-gyp\\lib\\util\\s3_setup.js"
+      ]
+    ],
+    [
+      "nock",
+      [
+        "app\\backend\\node_modules\\@mapbox\\node-pre-gyp\\lib\\util\\s3_setup.js"
+      ]
+    ]
+  ],
+  "ignoreUnused": [
+    "prisma",
+    "tsx"
+  ],
+  "ignoreUnimported": [
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\app\\backend\\endpoints\\migrate.js",
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\app\\backend\\prisma.config.ts",
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\app\\backend\\seed.js",
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\app\\frontend\\api\\index.js",
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\eslint.config.js",
+    "C:\\Users\\selya\\WebstormProjects\\softwarenotes\\vite.config.js"
+  ]
+}

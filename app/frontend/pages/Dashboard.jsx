@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Tooltip, Box, Paper, Stack, Typography, Grid, IconButton, Avatar, Button, Divider, Skeleton, List, ListItemButton, ListItemIcon, ListItemText, Card, CardContent } from '@mui/material';
+import { Menu, MenuItem, Tooltip, Box, Paper, Stack, Typography, Grid, IconButton, Avatar, Button, Divider, Skeleton, List, ListItemButton, ListItemIcon, ListItemText, Card, CardContent, Checkbox, Table, TableHead, TableRow, TableCell, TableBody, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
@@ -9,16 +9,22 @@ import SchoolIcon from '@mui/icons-material/School';
 import PersonIcon from '@mui/icons-material/Person';
 import UploadFileIcon from '@mui/icons-material/UploadFile';
 import DownloadIcon from '@mui/icons-material/Download';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CodeIcon from '@mui/icons-material/Code';
+import ListAltIcon from '@mui/icons-material/ListAlt';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddIcon from '@mui/icons-material/Add';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
+import FileDownloadIcon from '@mui/icons-material/FileDownload';
 import AdminImport from './AdminImport.jsx';
-import StudentsView from '../components/StudentsView.jsx'
-import TeachersView from '../components/TeachersView.jsx'
+import TeachersView from '../components/TeachersView.jsx';
+import StudentsView from '../components/StudentsView.jsx';
 import TopAppBar from '../components/TopAppBar.jsx'
 import { useNavigate } from 'react-router-dom'
 import { getStats } from '../api/stats.js'
+import { listStudents } from '../api/students.js'
 import { listTeachers } from '../api/teachers.js'
-import { listQuestionnaires, createQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi, importQuestionnaire } from '../api/questionnaires.js'
+import { listQuestionnaires, createQuestionnaire, deleteQuestionnaire as deleteQuestionnaireApi, importQuestionnaire, getQuestionnaire } from '../api/questionnaires.js'
 import { apiFetch } from '../api/http.js'
 
 export default function Dashboard() {
@@ -36,6 +42,10 @@ export default function Dashboard() {
   const [selectedMenu, setSelectedMenu] = useState(0);
   const [stats, setStats] = useState(null)
   const [loadingStats, setLoadingStats] = useState(true)
+  const [teachers, setTeachers] = useState([])
+  const [students, setStudents] = useState([])
+  const [selectedTeachers, setSelectedTeachers] = useState([])
+  const [selectedStudents, setSelectedStudents] = useState([])
   const [errorStats, setErrorStats] = useState(null)
   const [user, setUser] = useState(null)
   const [isApiOnline, setIsApiOnline] = useState(true)
@@ -43,7 +53,26 @@ export default function Dashboard() {
   const [questionnaires, setQuestionnaires] = useState([])
   const [importMessage, setImportMessage] = useState(null)
   const [exporting, setExporting] = useState(false)
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
 
+  // Menu states for cards
+  const [exportAnchor, setExportAnchor] = useState(null);
+  const [moreAnchor, setMoreAnchor] = useState(null);
+  const [activeQId, setActiveQId] = useState(null);
+
+  const handleExportOpen = (event, id) => {
+    setExportAnchor(event.currentTarget);
+    setActiveQId(id);
+  };
+  const handleMoreOpen = (event, id) => {
+    setMoreAnchor(event.currentTarget);
+    setActiveQId(id);
+  };
+  const handleMenuClose = () => {
+    setExportAnchor(null);
+    setMoreAnchor(null);
+    setActiveQId(null);
+  };
 
   useEffect(() => {
     const raw = localStorage.getItem('authUser')
@@ -68,11 +97,14 @@ export default function Dashboard() {
     setLoadingStats(true)
     setErrorStats(null)
     try {
-      const [sJson, tJson] = await Promise.all([
+      const [sJson, tJson, stJson] = await Promise.all([
         getStats(),
         listTeachers(),
+        listStudents()
       ])
       setStats(sJson)
+      setTeachers(tJson || [])
+      setStudents(stJson || [])
       // determine admin
       if (user && tJson && Array.isArray(tJson)) {
         const me = tJson.find(t => t.id === user.id)
@@ -102,6 +134,97 @@ export default function Dashboard() {
     } catch (e) {
       console.error(e)
     }
+  }
+
+  async function handleDuplicateQuestionnaire(id) {
+    try {
+      const qData = await getQuestionnaire(id);
+      const { id: _, createdAt, updatedAt, ...cleanData } = qData;
+      const copy = { ...cleanData, title: `${qData.title} (Copie)` };
+      
+      await importQuestionnaire(copy)
+      await loadDashboard()
+    } catch (e) {
+      console.error('Duplication error:', e)
+      alert(`Erreur lors de la duplication : ${e.message || 'Vérifiez que la route /api/questionnaires/import existe sur le serveur.'}`)
+    }
+  }
+
+  async function handleDeleteTeachers(ids) {
+    const toDelete = Array.isArray(ids) ? ids : [ids]
+    if (!confirm(`Supprimer ${toDelete.length} enseignant(s) ?`)) return
+    try {
+      await apiFetch('/api/teachers', { method: 'DELETE', json: { ids: toDelete } })
+      setTeachers(prev => prev.filter(t => !toDelete.includes(t.id)))
+      setSelectedTeachers([])
+    } catch (e) {
+      alert("Erreur lors de la suppression : " + e.message)
+    }
+  }
+
+  async function handleDeleteStudents(ids) {
+    const toDelete = Array.isArray(ids) ? ids : [ids]
+    if (!confirm(`Supprimer ${toDelete.length} étudiant(s) ?`)) return
+    try {
+      await apiFetch('/api/students', { method: 'DELETE', json: { ids: toDelete } })
+      setStudents(prev => prev.filter(s => !toDelete.includes(s.id)))
+      setSelectedStudents([])
+    } catch (e) {
+      alert("Erreur lors de la suppression : " + e.message)
+    }
+  }
+
+  async function handleExportJson(id) {
+    try {
+      const resp = await apiFetch(`/api/questionnaires/${id}/export-json`)
+      if (!resp.ok) throw new Error("Erreur export")
+      const data = await resp.json()
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `questionnaire-${id}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (e) {
+      console.error(e)
+      alert("Erreur lors de l'export JSON")
+    }
+  }
+
+  async function handleExportCsv(id) {
+    try {
+      const resp = await apiFetch(`/api/questionnaires/${id}/export-questions-csv`)
+      if (!resp.ok) throw new Error("Erreur export")
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `questions-questionnaire-${id}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+    } catch (e) {
+      console.error(e)
+      alert("Erreur lors de l'export CSV")
+    }
+  }
+
+  async function handleAllResultsExport() {
+    try {
+      const resp = await apiFetch('/api/questionnaires/results/all-csv')
+      if (!resp.ok) throw new Error("Erreur export")
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `tous-les-resultats-${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) { alert("Erreur lors de l'export des résultats") }
   }
 
   async function handleGlobalExport() {
@@ -200,8 +323,8 @@ export default function Dashboard() {
             display: 'flex',
             flexDirection: 'column',
             bgcolor: 'background.paper',
-            borderRight: '1px solid rgba(0,0,0,0.08)',
-            borderRadius: 0,
+            borderRight: '0.7px solid rgba(0,0,0,0.08)',
+            borderRadius: 6
           }}
         >
           {/* Profile Section */}
@@ -221,7 +344,7 @@ export default function Dashboard() {
                     }} 
                   />
                   <Typography sx={{ color: 'text.secondary', fontWeight: 500, fontSize: '11px', lineHeight: 1 }}>
-                    {isApiOnline ? 'API disponible' : 'API indisponible'}
+                    {isApiOnline ? 'Opérationnelle' : 'API indisponible'}
                   </Typography>
                 </Stack>
               </Box>
@@ -238,7 +361,7 @@ export default function Dashboard() {
                 selected={selectedMenu === index}
                 onClick={() => setSelectedMenu(index)}
                 sx={{
-                  borderRadius: 2,
+                  borderRadius: 8,
                   mb: 0.5,
                   py: 1,
                   '&.Mui-selected': {
@@ -266,7 +389,7 @@ export default function Dashboard() {
               fullWidth
               variant="text"
               startIcon={<LogoutIcon />}
-              onClick={logout}
+              onClick={() => setLogoutDialogOpen(true)}
               sx={{ 
                 color: 'text.secondary', 
                 textTransform: 'none', 
@@ -282,7 +405,20 @@ export default function Dashboard() {
         </Paper>
 
         {/* Main content */}
-        <Box sx={{ flex: 1, overflow: 'auto', p: { xs: 2, md: 3 }, minHeight: 0, bgcolor: '#fcfcfd' }}>
+        <Box sx={{ 
+          flex: 1, 
+          overflow: 'auto', 
+          p: { xs: 2, md: 3 }, 
+          minHeight: 0, 
+          bgcolor: '#fcfcfd',
+          '&::-webkit-scrollbar': { width: '4px' },
+          '&::-webkit-scrollbar-track': { background: 'transparent' },
+          '&::-webkit-scrollbar-thumb': { 
+            background: 'rgba(0, 0, 0, 0.05)', 
+            borderRadius: '10px',
+            '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+          }
+        }}>
           {importMessage && (
             <Paper sx={{ p: 1.5, mb: 2, bgcolor: 'rgba(55, 57, 143, 0.05)', border: '1px solid rgba(55, 57, 143, 0.1)' }} elevation={0}><Typography variant="body2">{importMessage}</Typography></Paper>
           )}
@@ -291,7 +427,7 @@ export default function Dashboard() {
             <>
               <Box sx={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', mb: 2 }}>
                 <Box>
-                  <Typography variant="h5" sx={{ fontWeight: 800, color: 'text.primary', letterSpacing: '-0.02em' }}>Vue d'ensemble</Typography>
+                  <Typography variant="h5" sx={{ fontWeight: 800, color: '#1a1a1b', letterSpacing: '-0.02em', mb: 0.5 }}>Vue d'ensemble</Typography>
                   <Typography variant="caption" sx={{ color: 'text.secondary' }}>Statistiques globales et gestion des questionnaires</Typography>
                 </Box>
                 {isAdmin && (
@@ -336,7 +472,7 @@ export default function Dashboard() {
                   icon: <PieChartIcon sx={{ color: '#4050f0' }} />
                 }].map((card, i) => (
                   <Grid item xs={12} sm={6} md={3} key={i}>
-                    <Card elevation={0} sx={{ borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', transition: 'transform 0.2s', '&:hover': { transform: 'translateY(-2px)' } }}>
+                    <Card elevation={0} sx={{ borderRadius: 5, border: '1px solid rgba(0,0,0,0.08)', bgcolor: '#fff', transition: 'all 0.2s', '&:hover': { transform: 'translateY(-4px)', borderColor: 'rgba(0,0,0,0.12)' } }}>
                       <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
                         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
                           <Box sx={{ p: 1, borderRadius: 2, bgcolor: 'rgba(55, 57, 143, 0.05)', color: 'primary.main', display: 'flex' }}>
@@ -344,10 +480,10 @@ export default function Dashboard() {
                           </Box>
                         </Box>
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, fontSize: '0.65rem', color: '#1a1a1b', opacity: 0.6 }}>
                             {card.title}
                           </Typography>
-                          <Typography sx={{ fontSize: 22, fontWeight: 800, mt: 0.2 }}>{loadingStats ? <Skeleton width="40%" /> : card.value}</Typography>
+                          <Typography sx={{ fontSize: 24, fontWeight: 800, mt: 0.2, color: '#1a1a1b' }}>{loadingStats ? <Skeleton width="40%" /> : card.value}</Typography>
                         </Box>
                       </CardContent>
                     </Card>
@@ -363,19 +499,40 @@ export default function Dashboard() {
                   {questionnaires && questionnaires.length ? (
                     questionnaires.map(q => (
                       <Grid item key={q.id} xs={12} sm={6} md={4} lg={3}>
-                        <Box sx={{ p: 2, borderRadius: 3, bgcolor: 'rgba(0,0,0,0.025)', display: 'flex', flexDirection: 'column', gap: 1.5, transition: 'background 0.2s', '&:hover': { bgcolor: 'rgba(0,0,0,0.05)' } }}>
-                          <Box sx={{ mr: 2, minWidth: 0 }}>
+                        <Box sx={{ 
+                          p: 2.5, 
+                          borderRadius: '24px', 
+                          bgcolor: '#fff', 
+                          border: '1px solid rgba(0,0,0,0.06)', 
+                          position: 'relative',
+                          display: 'flex', 
+                          flexDirection: 'column', 
+                          gap: 1.5, 
+                          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)', 
+                          '&:hover': { transform: 'translateY(-4px)', boxShadow: '0 12px 24px rgba(0,0,0,0.04)' } 
+                        }}>
+                          {isAdmin && (
+                            <IconButton 
+                              size="small" 
+                              onClick={(e) => handleMoreOpen(e, q.id)}
+                              sx={{ position: 'absolute', top: 12, right: 10, color: 'text.secondary', p: 1 }}
+                            >
+                              <MoreVertIcon fontSize="small" />
+                            </IconButton>
+                          )}
+
+                          <Box sx={{ mr: 8, minWidth: 0 }}>
                             <Typography noWrap sx={{ fontWeight: 700, fontSize: 14, mb: 0 }}>{q.title}</Typography>
                             <Typography sx={{ fontSize: 11, color: 'text.secondary', opacity: 0.8 }}>ID: {q.id}</Typography>
                           </Box>
-                          <Divider sx={{ opacity: 0.5 }} />
+                          <Divider sx={{ opacity: 0.4 }} />
                           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                             <Button 
                               size="small" 
                               variant="contained" 
-                              disableElevation 
+                              disableElevation
                               onClick={() => navigate(`/admin/question-manager/${q.id}`)}
-                              sx={{ textTransform: 'none', borderRadius: 1.5, bgcolor: 'primary.main', px: 2 }}
+                              sx={{ textTransform: 'none', borderRadius: 100, bgcolor: 'primary.main', px: 2.5, fontWeight: 600 }}
                             >
                               Ouvrir
                             </Button>
@@ -387,9 +544,9 @@ export default function Dashboard() {
                                     <BarChartIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Supprimer">
-                                  <IconButton size="small" onClick={() => deleteQuestionnaire(q.id)} color="error">
-                                    <DeleteIcon fontSize="small" />
+                                <Tooltip title="Exporter">
+                                  <IconButton size="small" onClick={(e) => handleExportOpen(e, q.id)}>
+                                    <FileDownloadIcon fontSize="small" />
                                   </IconButton>
                                 </Tooltip>
                               </Stack>
@@ -408,50 +565,148 @@ export default function Dashboard() {
             </>
           )}
 
-          {selectedMenu === 1 && (
-            <>
-              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Enseignants</Typography>
-              <TeachersView />
-            </>
-          )}
+          {selectedMenu === 1 && <TeachersView />}
 
-          {selectedMenu === 2 && (
-            <>
-              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Étudiants</Typography>
-              <StudentsView />
-            </>
-          )}
+          {selectedMenu === 2 && <StudentsView />}
 
           {selectedMenu === 3 && isAdmin && (
             <>
-              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Exporter les données</Typography>
-              <Paper elevation={0} sx={{ p: 3, borderRadius: 3, border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'background.paper' }}>
-                <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-                  Générez une sauvegarde complète du site au format JSON. Le fichier contiendra : questionnaires, étudiants, enseignants et résultats.
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  disableElevation
-                  startIcon={<DownloadIcon />} 
-                  onClick={handleGlobalExport}
-                  disabled={exporting}
-                  sx={{ borderRadius: 2, px: 3, bgcolor: '#37398f', textTransform: 'none' }}
-                >
-                  {exporting ? 'Génération du fichier...' : 'Exporter (télécharger)'}
-                </Button>
-              </Paper>
+              <Typography sx={{ fontSize: 28, fontWeight: 800, mb: 2, color: '#1a1a1b', letterSpacing: '-0.02em' }}>Exporter les données</Typography>
+              <Stack spacing={3}>
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'background.paper' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Sauvegarde complète (JSON)</Typography>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                    Générez une sauvegarde complète du site au format JSON (questionnaires, étudiants, enseignants et résultats).
+                  </Typography>
+                  <Button 
+                    variant="contained" 
+                    disableElevation
+                    startIcon={<DownloadIcon />} 
+                    onClick={handleGlobalExport}
+                    disabled={exporting}
+                    sx={{ borderRadius: 100, px: 4, bgcolor: '#37398f', textTransform: 'none' }}
+                  >
+                    {exporting ? 'Génération...' : 'Télécharger la sauvegarde'}
+                  </Button>
+                </Paper>
+
+                <Paper elevation={0} sx={{ p: 3, borderRadius: 6, border: '1px solid rgba(0,0,0,0.06)', bgcolor: 'background.paper' }}>
+                  <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 1 }}>Notes et résultats (CSV)</Typography>
+                  <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+                    Téléchargez un fichier CSV contenant toutes les notes finales de tous les étudiants pour l'ensemble des questionnaires.
+                  </Typography>
+                  <Button 
+                    variant="outlined" 
+                    startIcon={<ListAltIcon />} 
+                    onClick={handleAllResultsExport}
+                    sx={{ borderRadius: 100, px: 4, textTransform: 'none' }}
+                  >
+                    Exporter tous les résultats
+                  </Button>
+                </Paper>
+              </Stack>
             </>
           )}
 
           {selectedMenu === 4 && isAdmin && (
             <>
-              <Typography sx={{ fontSize: 28, fontWeight: 600, mb: 2 }}>Importation</Typography>
+              <Typography sx={{ fontSize: 28, fontWeight: 800, mb: 2, color: '#1a1a1b', letterSpacing: '-0.02em' }}>Importation</Typography>
               <AdminImport />
             </>
           )}
-
         </Box>
       </Box>
+
+      {/* Card Menus */}
+      <Menu
+        anchorEl={exportAnchor}
+        open={Boolean(exportAnchor)}
+        onClose={handleMenuClose}
+        MenuListProps={{ sx: { py: 0.5 } }}
+        slotProps={{
+          paper: {
+            elevation: 0,
+            sx: { 
+              borderRadius: '24px', 
+              mt: 1, 
+              minWidth: 220,
+              p: 0.4,
+              border: '1px solid rgba(0,0,0,0.08)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+              bgcolor: 'background.paper'
+            }
+          }
+        }}
+      >
+        <Typography variant="caption" sx={{ px: 2, py: 1, color: 'text.secondary', fontWeight: 600 }}>Exporter le questionnaire</Typography>
+        <MenuItem 
+          onClick={() => { handleExportJson(activeQId); handleMenuClose(); }} 
+          sx={{ borderRadius: '100px', py: 1, px: 2, mb: 0.5, mx: 0.5, '&:hover': { bgcolor: 'rgba(55, 57, 143, 0.08)' } }}
+        >
+          <ListItemIcon sx={{ color: 'text.primary', minWidth: '36px !important' }}><CodeIcon fontSize="small" /></ListItemIcon>
+          <ListItemText primary="Questionnaire entier (JSON)" primaryTypographyProps={{ fontSize: 14, fontWeight: 500 }} />
+        </MenuItem>
+        <MenuItem 
+          onClick={() => { handleExportCsv(activeQId); handleMenuClose(); }} 
+          sx={{ borderRadius: '100px', py: 1, px: 2, mx: 0.5, '&:hover': { bgcolor: 'rgba(55, 57, 143, 0.08)' } }}
+        >
+          <ListItemIcon sx={{ color: 'text.primary', minWidth: '36px !important' }}><ListAltIcon fontSize="small" /></ListItemIcon>
+          <ListItemText primary="Questions et catégories (CSV)" primaryTypographyProps={{ fontSize: 14, fontWeight: 500 }} />
+        </MenuItem>
+      </Menu>
+
+      <Menu
+        anchorEl={moreAnchor}
+        open={Boolean(moreAnchor)}
+        onClose={handleMenuClose}
+        MenuListProps={{ sx: { py: 0.5 } }}
+        slotProps={{
+          paper: {
+            elevation: 0,
+            sx: {
+              borderRadius: '24px', 
+              mt: 1, 
+              minWidth: 190,
+              p: 0.4,
+              border: '1px solid rgba(0,0,0,0.08)',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+              bgcolor: 'background.paper'
+            }
+          }
+        }}
+      >
+        <MenuItem 
+          onClick={() => { handleDuplicateQuestionnaire(activeQId); handleMenuClose(); }} 
+          sx={{ borderRadius: '100px', py: 1, px: 2, mb: 0.5, mx: 0.5, '&:hover': { bgcolor: 'rgba(55, 57, 143, 0.08)' } }}
+        >
+          <ListItemIcon sx={{ color: 'text.primary', minWidth: '36px !important' }}><ContentCopyIcon fontSize="small" /></ListItemIcon>
+          <ListItemText primary="Dupliquer" primaryTypographyProps={{ fontSize: 14, fontWeight: 500 }} />
+        </MenuItem>
+        <Divider sx={{ my: 1, mx: 3, opacity: 0.6 }} />
+        <MenuItem 
+          onClick={() => { deleteQuestionnaire(activeQId); handleMenuClose(); }} 
+          sx={{ borderRadius: '100px', py: 1, px: 2, mx: 0.5, color: 'error.main', '&:hover': { bgcolor: 'rgba(211, 47, 47, 0.08)' } }}
+        >
+          <ListItemIcon sx={{ color: 'error.main', minWidth: '36px !important' }}><DeleteIcon fontSize="small" color="inherit" /></ListItemIcon>
+          <ListItemText primary="Supprimer" primaryTypographyProps={{ fontSize: 14, fontWeight: 600 }} />
+        </MenuItem>
+      </Menu>
+
+      <Dialog open={logoutDialogOpen} onClose={() => setLogoutDialogOpen(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }}>
+        <DialogTitle sx={{ fontWeight: 700, color: '#1a1a1b' }}>Déconnexion</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Êtes-vous sûr de vouloir vous déconnecter ?
+          </Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Note : Ce logiciel est en BETA, assurez-vous d'avoir sauvegardé vos modifications importantes.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setLogoutDialogOpen(false)} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Rester</Button>
+          <Button variant="contained" color="error" onClick={logout} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Se déconnecter</Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }

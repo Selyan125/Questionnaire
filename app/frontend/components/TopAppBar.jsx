@@ -87,6 +87,7 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
         setEditValue('');
     }
     function startLongPress(e, index) {
+        if (typeof onRenamePage !== 'function') return;
         longPressTriggeredRef.current = false;
         const anchor = e.currentTarget;
         timerRef.current = setTimeout(() => openEdit(anchor, index), 600);
@@ -145,8 +146,9 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                                 document.execCommand ? document.execCommand('insertText', false, text) : (event.target.innerText += text);
                             } : undefined}
                             sx={{
-                                fontWeight: 500,
+                                fontWeight: 700,
                                 fontSize: "1.25rem",
+                                color: "#1a1a1b",
                                 outline: 'none',
                                 width: { xs: 140, sm: 260, md: 320 },
                                 maxWidth: { xs: 140, sm: 260, md: 320 },
@@ -179,7 +181,14 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                     onClose={() => closeDatePopover()}
                     anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
                     transformOrigin={{ vertical: 'top', horizontal: 'left' }}
-                    PaperProps={{ sx: { p: 2, minWidth: 320 } }}
+                    slotProps={{
+                        paper: {
+                            sx: { 
+                                p: 1.5, minWidth: 300, borderRadius: '24px', 
+                                border: '1px solid rgba(0,0,0,0.05)', boxShadow: '0 12px 48px rgba(0,0,0,0.12)' 
+                            }
+                        }
+                    }}
                 >
                     <LocalizationProvider dateAdapter={AdapterDayjs}>
                         <StaticDateTimePicker
@@ -226,10 +235,10 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                             <Box key={index} sx={{ display: 'flex', alignItems: 'center' }}>
                                 <Button
                                     onClick={(e) => { if (longPressTriggeredRef.current) { longPressTriggeredRef.current = false; return; } onSelectPage(index) }}
-                                    onMouseDown={(e) => startLongPress(e, index)}
-                                    onTouchStart={(e) => startLongPress(e, index)}
-                                    onMouseUp={() => cancelLongPress()}
-                                    onMouseLeave={() => cancelLongPress()}
+                                    onMouseDown={onRenamePage ? (e) => startLongPress(e, index) : undefined}
+                                    onTouchStart={onRenamePage ? (e) => startLongPress(e, index) : undefined}
+                                    onMouseUp={onRenamePage ? () => cancelLongPress() : undefined}
+                                    onMouseLeave={onRenamePage ? () => cancelLongPress() : undefined}
                                     onTouchEnd={() => cancelLongPress()}
                                     sx={{
                                         px: 2,
@@ -247,6 +256,23 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                                     }}
                                 >
                                     {page.name}
+                                    {onRenamePage && page.maxPoints > 0 && (
+                                        <Box 
+                                            component="span" 
+                                            sx={{ 
+                                                ml: 1, 
+                                                fontSize: '0.65rem', 
+                                                fontWeight: 800, 
+                                                bgcolor: selectedPage === index ? 'rgba(255,255,255,0.2)' : 'rgba(0,0,0,0.06)', 
+                                                px: 0.7, 
+                                                py: 0.2, 
+                                                borderRadius: '6px',
+                                                color: selectedPage === index ? 'white' : 'text.secondary'
+                                            }}
+                                        >
+                                            {page.maxPoints} pts
+                                        </Box>
+                                    )}
                                 </Button>
 
                                 {index < pages.length - 1 && (
@@ -262,10 +288,17 @@ function TopAppBar({ pages = [], selectedPage, onSelectPage, onAddCategory, onRe
                             onClose={() => closeEdit()}
                             anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
                             transformOrigin={{ vertical: 'top', horizontal: 'center' }}
-                            PaperProps={{ sx: { p: 1, minWidth: 200 } }}
+                            slotProps={{
+                                paper: {
+                                    sx: { 
+                                        p: 1.5, minWidth: 240, borderRadius: '20px', 
+                                        border: '1px solid rgba(0,0,0,0.05)', boxShadow: '0 8px 32px rgba(0,0,0,0.12)' 
+                                    }
+                                }
+                            }}
                         >
                             <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
-                                <TextField size="small" value={editValue} onChange={(e) => setEditValue(e.target.value)} fullWidth />
+                                <TextField size="small" value={editValue} onChange={(e) => setEditValue(e.target.value)} fullWidth sx={{ '& .MuiOutlinedInput-root': { borderRadius: '12px' } }} />
                                 <IconButton size="small" onClick={async () => { if (typeof onRenamePage === 'function' && editIndex != null) { await onRenamePage(editIndex, editValue); } closeEdit(); }}>
                                     <CheckIcon fontSize="small" />
                                 </IconButton>

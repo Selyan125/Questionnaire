@@ -5,13 +5,39 @@ const router = express.Router()
 
 router.post('/submissions', requireTeacher, async (req, res) => {
   try {
-    const { questionnaireId, answers, submittedAt, studentId: sid } = req.body
-    if (!questionnaireId || !sid) return res.status(400).json({ error: 'Missing fields' })
-    if (await prisma.submission.findFirst({ where: { questionnaireId: Number(questionnaireId), studentId: Number(sid) } })) return res.status(409).json({ error: 'Submission exists' })
+    const { questionnaireId, answers, submittedAt, studentId, evaluatorId, score, sessionId } = req.body
+    if (!questionnaireId || !studentId) return res.status(400).json({ error: 'Missing fields' })
+    
+    const qid = Number(questionnaireId)
+    const sid = Number(studentId)
+    const tid = evaluatorId ? Number(evaluatorId) : Number(req.user.id)
+    const sessId = sessionId ? Number(sessionId) : null
     const d = parseSubmissionDate(submittedAt) || new Date()
-    await prisma.submission.create({ data: { questionnaireId: Number(questionnaireId), studentId: Number(sid), answers: JSON.stringify(answers || []), submittedAt: d } })
+
+    // On cherche si une évaluation existe déjà pour ce duo étudiant/questionnaire
+    const existing = await prisma.submission.findFirst({
+      where: { questionnaireId: qid, studentId: sid }
+    })
+
+    const subData = {
+      answers: JSON.stringify(answers || {}),
+      submittedAt: d,
+      teacherId: tid,
+      score: score !== undefined ? Number(score) : undefined,
+      sessionId: sessId
+    }
+
+    if (existing) {
+      await prisma.submission.update({ where: { id: existing.id }, data: subData })
+    } else {
+      await prisma.submission.create({ data: { ...subData, questionnaireId: qid, studentId: sid } })
+    }
+
     res.status(201).json({ success: true })
-  } catch { res.status(500).json({ error: 'Failed to save' }) }
+  } catch (error) { 
+    console.error("Submission error:", error)
+    res.status(500).json({ error: 'Failed to save evaluation' }) 
+  }
 })
 
 router.get('/submissions/:id', requireTeacher, async (req, res) => {

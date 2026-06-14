@@ -1,17 +1,34 @@
-import React, { useState } from 'react'
-import { Box, Paper, Typography, TextField, MenuItem, Button, Table, TableBody, TableCell, TableHead, TableRow } from '@mui/material'
+import React, { useState, useEffect } from 'react'
+import { Box, Paper, Typography, TextField, MenuItem, Button, Table, TableBody, TableCell, TableHead, TableRow, Stack, Divider, FormControlLabel, Switch } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
 import { importUsers } from '../api/admin.js'
 import { createQuestionnaire } from '../api/questionnaires.js'
 import { apiJson } from '../api/http.js' // Assuming apiJson is available for new import
+//import { useSnackbar } from 'notistack'
 
 export default function AdminImport() {
   const [csv, setCsv] = useState('')
-  const [targetRole, setTargetRole] = useState('student')
+  const [targetRole, setTargetRole] = useState('teacher_csv')
   const [results, setResults] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
-  const [jsonFile, setJsonFile] = useState(null) // New state for JSON file
+  const [isDraggingOver, setIsDraggingOver] = useState(false); 
+  const [jsonFile, setJsonFile] = useState(null)
+  
+  // States pour l'import de questions
+  const [questionnaires, setQuestionnaires] = useState([])
+  const [selectedQId, setSelectedQId] = useState('new')
+  const [qConfig, setQConfig] = useState({ title: 'Import Questions', maxScore: 20, gradingMode: 'points' })
+
+  useEffect(() => {
+    async function loadQ() {
+      try {
+        const data = await apiJson('/api/questionnaires')
+        setQuestionnaires(data || [])
+      } catch (e) { console.error(e) }
+    }
+    loadQ()
+  }, [])
 
   function parseCsv(text) {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
@@ -19,9 +36,47 @@ export default function AdminImport() {
     for (const line of lines) {
       const parts = line.split(',').map(p => p.trim())
       // expect at least email in first column
-      rows.push({ email: parts[0], nom: parts[1] || '', prenom: parts[2] || '' })
+      rows.push({ 
+        email: parts[0], 
+        nom: parts[1] || '', 
+        prenom: parts[2] || '',
+        year: parts[3] || '',
+        group: parts[4] || ''
+      })
     }
     return rows
+  }
+
+  const handleDragOver = (e) => {
+    e.preventDefault()
+    setIsDraggingOver(true)
+  }
+
+  const handleDragLeave = (e) => {
+    e.preventDefault()
+    setIsDraggingOver(false)
+  }
+
+  const handleDrop = (e) => {
+    e.preventDefault()
+    setIsDraggingOver(false)
+    setError(null)
+    const files = e.dataTransfer.files
+    if (files && files.length > 0) {
+      const file = files[0]
+      const reader = new FileReader()
+      reader.onload = (event) => {
+        const content = event.target.result;
+        if (targetRole === 'full_json') {
+            setJsonFile(file);
+        } else {
+            setCsv(content);
+        }
+        // Le changement de state étant asynchrone, l'import utilisera 
+        // les valeurs passées ici ou via un effet. 
+      };
+      reader.readAsText(file)
+    }
   }
 
   async function handleImport() {
@@ -33,12 +88,12 @@ export default function AdminImport() {
         setError('Veuillez sélectionner un fichier JSON.');
         return;
       }
-    } else { // CSV import
-      const users = parseCsv(csv);
-      if (users.length === 0) {
-        setError('Aucune ligne trouvée dans le CSV.');
+    } else if (!csv) { // CSV import, check if csv content is present
+        setError('Veuillez entrer des données CSV ou déposer un fichier.');
         return;
-      }
+    } else if (parseCsv(csv).length === 0) {
+      setError('Aucune ligne valide trouvée dans le CSV.');
+      return;
     }
 
     setLoading(true)
@@ -50,6 +105,17 @@ export default function AdminImport() {
         // This API endpoint needs to be created in the backend
         data = await apiJson('/api/admin/import-all', { method: 'POST', json: payload });
         setResults([{ status: 'success', message: data.message || 'Importation complète réussie.' }]);
+      } else if (targetRole === 'questions_csv') {
+        data = await apiJson('/api/questionnaires/import-questions-csv', {
+          method: 'POST',
+          json: {
+            csv,
+            questionnaireId: selectedQId === 'new' ? null : selectedQId,
+            config: qConfig
+          }
+        })
+        setResults([{ status: 'success', message: 'Questions importées avec succès.' }])
+        if (data.questionnaireId) navigate(`/admin/question-manager/${data.questionnaireId}`)
       } else { // CSV import for students or teachers
         data = await importUsers({ targetRole: targetRole.replace('_csv', ''), users: parseCsv(csv) });
         setResults(data && data.results ? data.results : null);
@@ -87,12 +153,12 @@ export default function AdminImport() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           {targetRole === 'full_json'
             ? 'Sélectionnez un fichier JSON contenant une sauvegarde complète (questionnaires, étudiants, enseignants).'
-            : 'Format CSV: email,nom,prenom | Les mots de passe sont générés automatiquement.'
+            : 'Format CSV: email,nom,prenom,année,groupe'
           }
         </Typography>
 
         <TextField
-          select
+          select // No borderRadius here, it's handled by the root TextField style
           label="Type d'importation"
           value={targetRole}
           onChange={(e) => {
@@ -102,27 +168,95 @@ export default function AdminImport() {
             setResults(null); // Clear results
             setError(null); // Clear error
           }}
-          sx={{ mb: 2, width: 280 }}
         >
           <MenuItem value="student_csv">Étudiants (CSV)</MenuItem>
           <MenuItem value="teacher_csv">Enseignants (CSV)</MenuItem>
+          <MenuItem value="questions_csv">Questions (CSV)</MenuItem>
           <MenuItem value="full_json">Sauvegarde complète (JSON)</MenuItem>
         </TextField>
 
-        {targetRole === 'full_json' ? (
-          <Box sx={{ mb: 2 }}>
-            <Button variant="outlined" component="label" fullWidth sx={{ py: 1.5, textTransform: 'none', borderRadius: 2 }}>
+        {targetRole === 'questions_csv' && (
+          <Box sx={{ mt: 2, mb: 2, p: 2, bgcolor: 'rgba(0,0,0,0.02)', borderRadius: 3, border: '1px solid rgba(0,0,0,0.05)' }}>
+            <Typography variant="subtitle2" sx={{ mb: 2, fontWeight: 700 }}>Destination de l'import</Typography>
+            <Stack spacing={2}>
+              <TextField
+                select
+                label="Importer dans..."
+                value={selectedQId}
+                onChange={(e) => setSelectedQId(e.target.value)}
+                fullWidth
+              >
+                <MenuItem value="new">+ Créer un nouveau questionnaire</MenuItem>
+                {questionnaires.map(q => (
+                  <MenuItem key={q.id} value={q.id}>{q.title} (ID: {q.id})</MenuItem>
+                ))}
+              </TextField>
+              
+              {selectedQId === 'new' && (
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                  <TextField label="Titre" value={qConfig.title} onChange={(e) => setQConfig({ ...qConfig, title: e.target.value })} fullWidth />
+                  <TextField label="Note Max" type="number" value={qConfig.maxScore} onChange={(e) => setQConfig({ ...qConfig, maxScore: e.target.value })} sx={{ width: 120 }} />
+                  <TextField
+                    select
+                    label="Notation"
+                    value={qConfig.gradingMode}
+                    onChange={(e) => setQConfig({ ...qConfig, gradingMode: e.target.value })}
+                    sx={{ width: 150 }}
+                  >
+                    <MenuItem value="points">Points</MenuItem>
+                    <MenuItem value="coefficient">Coefficients</MenuItem>
+                    <MenuItem value="percentage">Pourcentage</MenuItem>
+                  </TextField>
+                </Stack>
+              )}
+            </Stack>
+          </Box>
+        )}
+
+        <Box
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          sx={{
+            border: `2px dashed ${isDraggingOver ? 'primary.main' : 'rgba(0,0,0,0.12)'}`,
+            borderRadius: 4,
+            p: 3,
+            mb: 2,
+            mt: 1,
+            textAlign: 'center',
+            bgcolor: isDraggingOver ? 'primary.light' : 'transparent',
+            transition: 'background-color 0.3s, border-color 0.3s',
+            cursor: 'pointer',
+          }}
+        >
+          <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
+            Glissez-déposez un fichier ici ou
+          </Typography>
+          {targetRole === 'full_json' ? (
+            <Button variant="outlined" component="label" sx={{ textTransform: 'none', borderRadius: 100, px: 3 }}>
               {jsonFile ? jsonFile.name : 'Sélectionner un fichier JSON'}
               <input type="file" accept="application/json" hidden onChange={(e) => setJsonFile(e.target.files ? e.target.files[0] : null)} />
             </Button>
-          </Box>
-        ) : (
-          <TextField label="Données CSV" placeholder="ex: user1@example.com,Nom,Prenom" multiline minRows={6} fullWidth value={csv} onChange={(e) => setCsv(e.target.value)} sx={{ mb: 2 }} />
-        )}
+          ) : (
+            <Button variant="outlined" component="label" sx={{ textTransform: 'none', borderRadius: 100, px: 3 }}>
+              {csv ? 'Fichier CSV chargé' : 'Sélectionner un fichier CSV'}
+              <input type="file" accept=".csv" hidden onChange={(e) => {
+                const file = e.target.files ? e.target.files[0] : null;
+                if (file) {
+                  const reader = new FileReader();
+                  reader.onload = (event) => setCsv(event.target.result);
+                  reader.readAsText(file);
+                } else {
+                  setCsv('');
+                }
+              }} />
+            </Button>
+          )}
+        </Box>
 
         {error && <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>}
 
-        <Button variant="contained" onClick={handleImport} disabled={loading}>{loading ? 'Importation...' : 'Importer'}</Button>
+        <Button variant="contained" onClick={handleImport} disabled={loading || (!csv && !jsonFile)} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 4 }}>{loading ? 'Importation...' : 'Importer'}</Button>
 
         {results && (
           <Box sx={{ mt: 3 }}>
@@ -132,7 +266,7 @@ export default function AdminImport() {
                 <TableRow>
                   <TableCell>Email / Élément</TableCell>
                   <TableCell>Statut</TableCell>
-                  {targetRole !== 'full_json' && <TableCell>Mot de passe généré</TableCell>}
+                  {targetRole === 'teacher_csv' && <TableCell>Mot de passe (Enseignants uniquement)</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -140,7 +274,7 @@ export default function AdminImport() {
                   <TableRow key={i}>
                     <TableCell>{r.email || (r.input && r.input.email) || r.message || ''}</TableCell>
                     <TableCell>{r.status}{r.reason ? ` (${r.reason})` : ''}</TableCell>
-                    {targetRole !== 'full_json' && <TableCell>{r.password || ''}</TableCell>}
+                    {targetRole === 'teacher_csv' && <TableCell>{r.password || ''}</TableCell>}
                   </TableRow>
                 ))}
               </TableBody>

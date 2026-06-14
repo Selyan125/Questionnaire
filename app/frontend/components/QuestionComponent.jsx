@@ -21,10 +21,11 @@ import EditIcon from '@mui/icons-material/Edit';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { apiJson } from '../api/http.js'
-import { updateQuestionTitle, deleteQuestion as deleteQuestionApi, addElement as addQuestionElement, updateElement, deleteElement as deleteElementApi } from '../api/questions.js'
+import { updateQuestionTitle, deleteQuestion as deleteQuestionApi, addElement as addQuestionElement, updateElement, deleteElement as deleteElementApi, duplicateQuestion } from '../api/questions.js'
 
 function getElementKey(el, idx) {
     if (el && el.id !== undefined && el.id !== null && el.id !== '') {
@@ -199,16 +200,27 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         if (!customElement) return;
         const nextElement = { ...customElement, ...patch };
         const evaluatingType = Number(nextElement.evaluatingType || 0);
-        const evaluatingValue = (evaluatingType === 0 || evaluatingType === 5) ? 0 : Number(nextElement.evaluatingValue || 0);
+        
+        let numericValue = parseFloat(nextElement.evaluatingValue);
+        if (isNaN(numericValue) || (evaluatingType === 0 || evaluatingType === 5)) {
+            numericValue = 0;
+        } else {
+            numericValue = Math.max(0, numericValue);
+        }
+
         const payload = {
             title: nextElement.title || '',
             type: nextElement.type || 'radio',
             priority: Number(nextElement.priority || 0),
             evaluatingType,
-            evaluatingValue,
+            evaluatingValue: numericValue,
         };
 
-        setCustomElement({ ...nextElement, evaluatingType, evaluatingValue });
+        const updatedState = { ...nextElement, evaluatingType };
+        if (evaluatingType === 0 || evaluatingType === 5) {
+            updatedState.evaluatingValue = 0;
+        }
+        setCustomElement(updatedState);
 
 if (patch.type === 'radio' || patch.type === 'checkbox') {
     const newEls = elements.map(el => ({
@@ -316,7 +328,7 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
         <Card
             //elevation={0.5}
             sx={{
-                borderRadius: 4,
+                borderRadius: 7,
                 p: 2.5,
                 width: { xs: '100%', sm: 'auto' },
                 height: '100%',
@@ -332,11 +344,22 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
         >
             <Stack spacing={0.5} sx={{ justifyContent: "flex-start", alignItems: "flex-start", pb: 1, width: '100%', flex: 1, minHeight: 0, height: '100%' }}>
                 <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', flex: '0 0 auto' }}>
-                    <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 400 }}>Question {index}</Typography>
+                    <Typography variant="caption" sx={{ color: 'text.primary', fontWeight: 400, display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        {editing && <DragIndicatorIcon sx={{ fontSize: 14, cursor: 'grab', opacity: 0.6 }} />}
+                        Question {index}
+                    </Typography>
                     <Box>
                         {!readOnly && (
                             <>
                                 {question.id && editing && <IconButton size="small" onClick={deleteQuestion}><DeleteIcon sx={{ color: 'red' }} fontSize="small" /></IconButton>}
+                                {question.id && editing && (
+                                    <IconButton size="small" title="Dupliquer la question" onClick={async () => {
+                                        try {
+                                            await duplicateQuestion(question.id);
+                                            if (onRefresh) onRefresh();
+                                        } catch (e) { console.error(e); }
+                                    }}><ContentCopyIcon fontSize="small" /></IconButton>
+                                )}
                                 {editing && (
                                     <IconButton
                                         size="small"
@@ -373,8 +396,13 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                 overflowY: 'auto',
                                 pr: 0.5,
                                 pb: 1,
-                                scrollbarWidth: 'none',
-                                '&::-webkit-scrollbar': { width: 0, height: 0 },
+                                '&::-webkit-scrollbar': { width: '4px' },
+                                '&::-webkit-scrollbar-track': { background: 'transparent' },
+                                '&::-webkit-scrollbar-thumb': { 
+                                    background: 'rgba(0, 0, 0, 0.05)', 
+                                    borderRadius: '10px',
+                                    '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+                                }
                             }}
                         >
                             {elements && elements.length > 0 ? (
@@ -417,8 +445,13 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                 overflowY: 'auto',
                                 pr: 0.5,
                                 pb: 0.2,
-                                scrollbarWidth: 'none',
-                                '&::-webkit-scrollbar': { width: 0, height: 0 },
+                                '&::-webkit-scrollbar': { width: '4px' },
+                                '&::-webkit-scrollbar-track': { background: 'transparent' },
+                                '&::-webkit-scrollbar-thumb': { 
+                                    background: 'rgba(0, 0, 0, 0.05)', 
+                                    borderRadius: '10px',
+                                    '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+                                }
                             }}
                         >
                             {(elements || question.elements || []).map((el, idx) => (
@@ -427,11 +460,12 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                     key={el.id || idx}
                                     data-idx={idx}
                                     onDragOver={(e) => { if (readOnly) return; e.preventDefault(); setDragOverIndex(idx) }}
+                                    onDragStart={(e) => e.stopPropagation()} // Empêche de déplacer la question parente
                                     onDragEnter={(e) => { if (readOnly) return; e.preventDefault(); setDragOverIndex(idx) }}
                                     onDragLeave={() => { if (readOnly) return; setDragOverIndex(null) }}
                                     onDrop={async (e) => {
                                         if (readOnly) return
-                                        e.preventDefault(); setDragOverIndex(null)
+                                        e.preventDefault(); e.stopPropagation(); setDragOverIndex(null)
 
                                         const srcStr = e.dataTransfer.getData('text/element-index')
                                         const srcIdx = (typeof srcStr === 'string' && srcStr !== '') ? Number(srcStr) : draggingIndexRef.current
@@ -546,14 +580,14 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                 slotProps={{
                     paper: {
                         sx: {
-                            width: 260,
+                            width: 230,
                             p: 1.5,
                             ml: 1,
-                            display: 'grid',
-                            gap: 1.5,
-                            borderRadius: 2,
-                            border: '1px solid rgba(0,0,0,0.08)',
-                            boxShadow: '0 8px 24px rgba(0,0,0,0.14)',
+                            display: 'grid', // Keep as is
+                            gap: 1,
+                            borderRadius: '20px', // Conteneur Popover
+                            border: '1px solid rgba(0,0,0,0.05)',
+                            boxShadow: '0 8px 32px rgba(0,0,0,0.1)',
                         },
                     },
                 }}
@@ -565,10 +599,23 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                         label="Type de question"
                         value={customElement ? customElement.type || 'radio' : 'radio'}
                         onChange={(event) => updateCustomElement({ type: event.target.value })}
+                        MenuProps={{
+                            slotProps: {
+                                paper: {
+                                    sx: {
+                                        borderRadius: '20px',
+                                        mt: 1,
+                                        p: 0.4,
+                                        boxShadow: '0 8px 32px rgba(0,0,0,0.1)'
+                                    }
+                                }
+                            },
+                            MenuListProps: { sx: { py: 0.5 } }
+                        }}
                     >
-                        <MenuItem value="radio">Choix unique</MenuItem>
-                        <MenuItem value="checkbox">Choix multiple</MenuItem>
-                        <MenuItem value="text">Texte</MenuItem>
+                        <MenuItem value="radio" sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Choix unique</MenuItem>
+                        <MenuItem value="checkbox" sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Choix multiple</MenuItem>
+                        <MenuItem value="text" sx={{ borderRadius: '100px', mx: 0.5, py: 0.8, px: 1.5 }}>Texte</MenuItem>
                     </Select>
                 </FormControl>
                 <FormControl fullWidth size="small">
@@ -584,12 +631,25 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                 evaluatingValue: (nextType === 0 || nextType === 5) ? 0 : Number(customElement?.evaluatingValue || 0),
                             });
                         }}
+                        MenuProps={{
+                            slotProps: {
+                                paper: {
+                                    sx: {
+                                        borderRadius: '20px',
+                                        mt: 1,
+                                        p: 0.4,
+                                        boxShadow: '0 8px 32px rgba(0,0,0,0.1)'
+                                    }
+                                }
+                            },
+                            MenuListProps: { sx: { py: 0.5 } }
+                        }}
                     >
-                        <MenuItem value={0}>Non noté</MenuItem>
-                        <MenuItem value={1}>Ajoute</MenuItem>
-                        <MenuItem value={2}>Enlève</MenuItem>
-                        <MenuItem value={3}>Par coefficient</MenuItem>
-                        <MenuItem value={5}>Plafond catégorie</MenuItem>
+                        <MenuItem value={0} sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Non noté</MenuItem>
+                        <MenuItem value={1} sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Ajoute</MenuItem>
+                        <MenuItem value={2} sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Enlève</MenuItem>
+                        <MenuItem value={3} sx={{ borderRadius: '100px', mx: 0.5, mb: 0.4, py: 0.8, px: 1.5 }}>Par coefficient</MenuItem>
+                        <MenuItem value={5} sx={{ borderRadius: '100px', mx: 0.5, py: 0.8, px: 1.5 }}>Plafond catégorie</MenuItem>
                     </Select>
                 </FormControl>
                 <TextField
@@ -597,12 +657,11 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                     size="small"
                     type="number"
                     disabled={noteValueDisabled}
-                    value={noteValueDisabled ? '' : customElement?.evaluatingValue ?? 0}
+                    value={noteValueDisabled ? '' : (customElement?.evaluatingValue ?? 0)}
                     onChange={(event) => {
-                        const raw = event.target.value;
-                        updateCustomElement({ evaluatingValue: raw === '' ? 0 : parseFloat(raw) });
+                        updateCustomElement({ evaluatingValue: event.target.value });
                     }}
-                    inputProps={{ step: 0.1 }}
+                    inputProps={{ step: "any", min: 0 }}
                     fullWidth
                 />
             </Popover>

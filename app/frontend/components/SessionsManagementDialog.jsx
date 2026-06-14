@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react'
 import {
+  Drawer,
   Dialog,
   DialogTitle,
   DialogContent,
@@ -57,12 +58,14 @@ export default function SessionsManagementDialog({
   onAddStudent,
   onRemoveStudent,
   onAddJuryMaster,
+  onSelectSession,
 }) {
   const [selectedSessionTab, setSelectedSessionTab] = useState(0)
   const [editingName, setEditingName] = useState({})
   const [editingDate, setEditingDate] = useState({})
   const [newJuryName, setNewJuryName] = useState('')
   const [poolTab, setPoolTab] = useState(0)
+  const [studentSortBy, setStudentSortBy] = useState('year')
   const [dragOverZone, setDragOverZone] = useState(null)
 
   const handleDragStart = (e, item, type) => {
@@ -95,13 +98,16 @@ export default function SessionsManagementDialog({
     try {
       const data = JSON.parse(e.dataTransfer.getData('application/json'))
       const dragType = data.dragType
+      const session = sessions.find(s => s.id === sessionId)
 
       if (expectedType && dragType !== expectedType) return 
 
       if (dragType === 'teacher') {
+        if (session?.juries?.some(j => j.teacherId === data.id)) return
         const juryId = targetJuryId || data.juryId || (availableJuries?.[0]?.id)
         if (juryId) onAddJury(sessionId, juryId, data.id)
       } else if (dragType === 'student') {
+        if (session?.students?.some(s => s.studentId === data.id)) return
         const effectiveJuryId = targetJuryId || (sessions.find(s => s.id === sessionId)?.juries?.[0]?.juryId) || (availableJuries?.[0]?.id)
         if (effectiveJuryId) onAddStudent(sessionId, data.id, effectiveJuryId)
       }
@@ -110,10 +116,56 @@ export default function SessionsManagementDialog({
     }
   }
 
-  const poolTeachers = useMemo(() => availableTeachers || [], [availableTeachers])
-  const poolStudents = useMemo(() => availableStudents || [], [availableStudents])
-
   const currentSession = useMemo(() => sessions[selectedSessionTab], [sessions, selectedSessionTab])
+
+  const poolTeachers = useMemo(() => {
+    const all = availableTeachers || []
+    if (!currentSession) return all
+    const sessionTeacherIds = (currentSession.juries || []).map(j => j.teacherId)
+    return all.filter(t => !sessionTeacherIds.includes(t.id))
+  }, [availableTeachers, currentSession])
+
+  const hasMultipleYears = useMemo(() => {
+    const all = availableStudents || []
+    const years = new Set(all.map(s => s.year).filter(Boolean))
+    return years.size > 1
+  }, [availableStudents])
+
+  const poolStudents = useMemo(() => {
+    const all = availableStudents || []
+    let filtered = [...all]
+    if (currentSession) {
+      const sessionStudentIds = (currentSession.students || []).map(s => s.studentId)
+      filtered = filtered.filter(s => !sessionStudentIds.includes(s.id))
+    }
+    
+    const sorted = filtered.sort((a, b) => {
+      if (studentSortBy === 'year') {
+        const yA = parseInt(a.year) || 0
+        const yB = parseInt(b.year) || 0
+        if (yA !== yB) return yA - yB
+      }
+      const nameA = `${a.nom || ''} ${a.prenom || ''}`.toLowerCase()
+      const nameB = `${b.nom || ''} ${b.prenom || ''}`.toLowerCase()
+      return nameA.localeCompare(nameB)
+    })
+
+    if (studentSortBy === 'name') {
+      return { keys: ['Liste alphabétique'], groups: { 'Liste alphabétique': sorted } }
+    }
+
+    const groups = sorted.reduce((acc, s) => {
+      const label = s.year ? `Année ${s.year}` : 'Année non spécifiée'
+      if (!acc[label]) acc[label] = []
+      acc[label].push(s)
+      return acc
+    }, {})
+
+    return {
+      keys: Object.keys(groups).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      groups
+    }
+  }, [availableStudents, currentSession, studentSortBy])
 
   const juryGroups = useMemo(() => {
     if (!currentSession) return []
@@ -134,57 +186,133 @@ export default function SessionsManagementDialog({
     return Object.values(groups)
   }, [currentSession, availableJuries])
 
+  const handleTabChange = (event, newValue) => {
+    setSelectedSessionTab(newValue);
+    if (sessions[newValue] && typeof onSelectSession === 'function') {
+      onSelectSession(sessions[newValue].id);
+    }
+  };
+
   return (
-    <Dialog
-      fullWidth
-      maxWidth="lg"
+    <Drawer
+      anchor="right"
       open={open}
       onClose={onClose}
-      PaperProps={{ sx: { borderRadius: 2, overflow: 'hidden', boxShadow: 'none', border: '1px solid rgba(0,0,0,0.12)' } }}
+      PaperProps={{ sx: { width: { xs: '100%', sm: 800, md: 1000 }, borderRadius: { xs: 0, sm: '28px 0 0 28px' }, boxShadow: 'none', borderLeft: '1px solid rgba(0,0,0,0.12)' } }}
     >
-      <DialogTitle sx={{ color: 'text.primary', bgcolor: 'background.paper', borderBottom: '1px solid rgba(0,0,0,0.08)', py: 2, fontWeight: 700 }}>
+      <DialogTitle sx={{ color: '#1a1a1b', bgcolor: 'background.paper', borderBottom: '1px solid rgba(0,0,0,0.08)', py: 2, fontWeight: 700 }}>
         Gestion des sessions d'oral
       </DialogTitle>
-      <DialogContent dividers sx={{ bgcolor: '#fbfbfb', p: 0, display: 'flex', height: '75vh' }}>
+      <DialogContent dividers sx={{ bgcolor: '#fbfbfb', p: 0, display: 'flex', height: 'calc(100vh - 130px)' }}>
         {/* Left Pool Panel */}
         <Box sx={{ width: 300, borderRight: '1px solid rgba(0,0,0,0.08)', display: 'flex', flexDirection: 'column', bgcolor: 'background.paper', flexShrink: 0 }}>
           <Tabs value={poolTab} onChange={(_, v) => setPoolTab(v)} variant="fullWidth" sx={{ borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-            <Tab icon={<PersonIcon />} label="Profs" sx={{ textTransform: 'none', minHeight: 64 }} />
-            <Tab icon={<SchoolIcon />} label="Étudiants" sx={{ textTransform: 'none', minHeight: 64 }} />
+            <Tab  label="Enseignants" sx={{ textTransform: 'none', minHeight: 54, fontSize: 14}} />
+            <Tab  label="Étudiants" sx={{ textTransform: 'none', minHeight: 54, fontSize: 14 }} />
           </Tabs>
-          <Box sx={{ flex: 1, overflowY: 'auto', p: 1 }}>
+          {poolTab === 1 && (
+            <Box sx={{ px: 2, py: 1, borderBottom: '1px solid rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: 1 }}>
+              <Typography sx={{ fontSize: 11, color: 'text.secondary', fontWeight: 600, textTransform: 'uppercase' }}>Trier :</Typography>
+              <Select
+                value={studentSortBy}
+                onChange={(e) => setStudentSortBy(e.target.value)}
+                size="small"
+                variant="standard"
+                disableUnderline
+                sx={{ fontSize: 12, fontWeight: 500 }}
+              >
+                <MenuItem value="year" sx={{ fontSize: 12 }}>Par année</MenuItem>
+                <MenuItem value="name" sx={{ fontSize: 12 }}>Par nom</MenuItem>
+              </Select>
+            </Box>
+          )}
+          <Box sx={{ 
+            flex: 1, 
+            overflowY: 'auto', 
+            p: 1,
+            '&::-webkit-scrollbar': { width: '4px' },
+            '&::-webkit-scrollbar-track': { background: 'transparent' },
+            '&::-webkit-scrollbar-thumb': { 
+              background: 'rgba(0, 0, 0, 0.05)', 
+              borderRadius: '10px',
+              '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+            }
+          }}>
             <List size="small">
-              {(poolTab === 0 ? poolTeachers : poolStudents).map((item) => (
-                <ListItem
-                  key={item.id}
-                  draggable
-                  onDragStart={(e) => handleDragStart(e, item, poolTab === 0 ? 'teacher' : 'student')}
-                  sx={{
-                    mb: 1,
-                    borderRadius: 1.5,
-                    border: '1px solid rgba(0,0,0,0.06)',
-                    cursor: 'grab',
-                    display: 'flex',
-                    alignItems: 'center',
-                    py: 1,
-                    '&:hover': { bgcolor: 'action.hover' },
-                    '&:active': { cursor: 'grabbing' }
-                  }}
-                >
-                  <DragIndicatorIcon sx={{ color: 'text.disabled', mr: 1, fontSize: 20 }} />
-                  <ListItemText
-                    sx={{ m: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-                    primary={poolTab === 0 ? item.email : `${item.nom || ''} ${item.prenom || ''}`} 
-                    secondary={poolTab === 1 ? item.email : (item.jury || 'Sans jury')}
-                    primaryTypographyProps={{ fontSize: 13, fontWeight: 600, noWrap: true }}
-                    secondaryTypographyProps={{ fontSize: 11, noWrap: true }}
-                  />
-                </ListItem>
-              ))}
+              {poolTab === 0 ? (
+                poolTeachers.map((item) => (
+                  <ListItem
+                    key={item.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item, 'teacher')}
+                    sx={{
+                      mb: 1, borderRadius: '12px', border: '1px solid rgba(0,0,0,0.06)',
+                      cursor: 'grab', display: 'flex', alignItems: 'center', py: 1,
+                      '&:hover': { bgcolor: 'action.hover' }, '&:active': { cursor: 'grabbing' }
+                    }}
+                  >
+                    <DragIndicatorIcon sx={{ color: 'text.disabled', mr: 1, fontSize: 20 }} />
+                    <ListItemText
+                      sx={{ m: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
+                      primary={item.email}
+                      slotProps={{
+                        primary: { noWrap: true, sx: { fontSize: 14, fontWeight: 500 } }
+                      }}
+                    />
+                  </ListItem>
+                ))
+              ) : (
+                poolStudents.keys.map((year) => (
+                  <Box key={year} sx={{ mb: 2 }}>
+                    {hasMultipleYears && (
+                      <Typography sx={{ 
+                        px: 1.5, py: 0.4, mb: 1, mt: 1, fontSize: 11, fontWeight: 800, 
+                        color: 'text.secondary', bgcolor: 'rgba(0,0,0,0.03)', 
+                        textTransform: 'uppercase', borderRadius: 1 
+                      }}>
+                        {year}
+                      </Typography>
+                    )}
+                    {poolStudents.groups[year].map((item) => (
+                      <ListItem
+                        key={item.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, item, 'student')}
+                        sx={{
+                          mb: 0.5, borderRadius: '12px', border: '1px solid rgba(0,0,0,0.06)',
+                          cursor: 'grab', display: 'flex', alignItems: 'center', py: 1,
+                          '&:hover': { bgcolor: 'action.hover' }, '&:active': { cursor: 'grabbing' }
+                        }}
+                      >
+                        <DragIndicatorIcon sx={{ color: 'text.disabled', mr: 1, fontSize: 20 }} />
+                        <ListItemText
+                          sx={{ m: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
+                          primary={`${item.nom || ''} ${item.prenom || ''}`}
+                          slotProps={{
+                            primary: {
+                              noWrap: true,
+                              sx: { fontSize: 14, fontWeight: 500 },
+                            }
+                          }}
+                        />
+                      </ListItem>
+                    ))}
+                  </Box>
+                ))
+              )}
             </List>
           </Box>
           <Box sx={{ p: 2, bgcolor: 'rgba(0,0,0,0.02)', borderTop: '1px solid rgba(0,0,0,0.05)' }}>
-            <Typography variant="caption" color="text.secondary">
+           <Typography
+              component="div"
+              sx={{
+                fontSize: '0.75rem',
+                fontWeight: 400,
+                letterSpacing: '0.03333em',
+                color: 'text.secondary',
+                lineHeight: 1.3,
+              }}
+            >
               Glissez-déposez une personne sur une session pour l'assigner.
             </Typography>
           </Box>
@@ -195,7 +323,7 @@ export default function SessionsManagementDialog({
           <Box sx={{ borderBottom: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', px: 2, bgcolor: 'background.paper', gap: 1, minHeight: 56, flexShrink: 0 }}>
             <Tabs 
               value={selectedSessionTab} 
-              onChange={(_, v) => setSelectedSessionTab(v)} 
+              onChange={handleTabChange} 
               variant="scrollable" 
               scrollButtons="auto"
               sx={{ flex: 1, minWidth: 0, '& .MuiTabs-scroller': { overflow: 'hidden !important' } }}
@@ -233,14 +361,13 @@ export default function SessionsManagementDialog({
                           await onAddJuryMaster(newJuryName)
                           setNewJuryName('')
                         }}
-                        endIcon={<AddIcon />} variant="text"
-                        sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 1, height: 32, mr: -0.5 }}
+                      sx={{ textTransform: 'none', fontWeight: 600, borderRadius: 100, height: 32, mr: -0.5 }}
                       >
                         Créer jury
                       </Button>
                     </InputAdornment>
                   ),
-                  sx: { borderRadius: 2, pr: 0.5, bgcolor: 'background.default' }
+                sx: { borderRadius: '24px', pr: 0.5, bgcolor: 'background.default' }
                 }}
                 sx={{ width: 220 }}
               />
@@ -253,7 +380,14 @@ export default function SessionsManagementDialog({
               p: 3, 
               overflowY: 'auto', 
               backgroundImage: 'radial-gradient(rgba(0,0,0,0.02) 1px, transparent 0)',
-              backgroundSize: '20px 20px'
+              backgroundSize: '20px 20px',
+              '&::-webkit-scrollbar': { width: '4px' },
+              '&::-webkit-scrollbar-track': { background: 'transparent' },
+              '&::-webkit-scrollbar-thumb': { 
+                background: 'rgba(0, 0, 0, 0.05)', 
+                borderRadius: '10px',
+                '&:hover': { background: 'rgba(0, 0, 0, 0.15)' }
+              }
             }}
             onDragOver={(e) => e.preventDefault()}
             onDrop={(e) => currentSession && handleDrop(e, currentSession.id)}
@@ -265,7 +399,7 @@ export default function SessionsManagementDialog({
           ) : (
             <Stack spacing={3} sx={{ width: '100%' }}>
               {/* Info Bar */}
-              <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: 'background.paper', display: 'flex', gap: 2, alignItems: 'center', border: '1px solid rgba(0,0,0,0.1)', boxShadow: 'none' }}>
+              <Paper sx={{ p: 2, borderRadius: '24px', bgcolor: 'background.paper', display: 'flex', gap: 2, alignItems: 'center', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 2px 8px rgba(0,0,0,0.04)' }}>
                 <TextField
                   label="Nom"
                   value={editingName[currentSession.id] ?? currentSession.name}
@@ -286,7 +420,7 @@ export default function SessionsManagementDialog({
                     slotProps={{
                       textField: {
                         size: 'small',
-                        sx: { width: 180, '& .MuiOutlinedInput-root': { borderRadius: 1.5 } }
+                        sx: { width: 180, '& .MuiOutlinedInput-root': { borderRadius: '20px' } }
                       }
                     }}
                   />
@@ -311,7 +445,7 @@ export default function SessionsManagementDialog({
 
               <Stack spacing={2} sx={{ width: '100%' }}>
                 {juryGroups.length > 0 ? juryGroups.map((group, idx) => (
-                    <Card key={group.juryId || idx} variant="outlined" sx={{ borderRadius: 2, width: '100%', border: '1px solid rgba(0,0,0,0.1)', boxShadow: 'none' }}>
+                    <Card key={group.juryId || idx} sx={{ borderRadius: '24px', width: '100%', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
                       <CardContent sx={{ p: 2, flex: 1 }}>
                         <Typography sx={{ fontWeight: 700, mb: 2, color: 'primary.main', fontSize: 14 }}>
                           {group.juryName}
@@ -329,18 +463,18 @@ export default function SessionsManagementDialog({
                               sx={{ 
                                 minHeight: 52, 
                                 border: `1px dashed ${dragOverZone === `teacher-${group.juryId}` ? '#37398f' : 'rgba(0,0,0,0.12)'}`,
-                                bgcolor: dragOverZone === `teacher-${group.juryId}` ? 'rgba(55,57,143,0.04)' : 'rgba(0,0,0,0.01)',
-                                borderRadius: 1,
+                                bgcolor: dragOverZone === `teacher-${group.juryId}` ? 'rgba(55,57,143,0.06)' : 'rgba(0,0,0,0.01)',
+                                borderRadius: '16px',
                                 p: 1,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: 1,
-                                transition: 'all 0.2s'
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                               }}
                             >
                               {group.teachers.length > 0 ? (
                                 group.teachers.map(t => (
-                                  <Box key={t.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 1.5 }}>
+                                  <Box key={t.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 3 }}>
                                     <Typography sx={{ fontSize: 12, fontWeight: 500 }}>{t.teacherEmail}</Typography>
                                     <IconButton size="small" onClick={() => onRemoveJury(t.id)} sx={{ p: 0.25 }}>
                                       <DeleteIcon sx={{ fontSize: 16 }} />
@@ -364,18 +498,18 @@ export default function SessionsManagementDialog({
                               sx={{ 
                                 minHeight: 52, 
                                 border: `1px dashed ${dragOverZone === `student-${group.juryId}` ? '#37398f' : 'rgba(0,0,0,0.12)'}`,
-                                bgcolor: dragOverZone === `student-${group.juryId}` ? 'rgba(55,57,143,0.04)' : 'rgba(0,0,0,0.01)',
-                                borderRadius: 1,
+                                bgcolor: dragOverZone === `student-${group.juryId}` ? 'rgba(55,57,143,0.06)' : 'rgba(0,0,0,0.01)',
+                                borderRadius: '16px',
                                 p: 1,
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: 1,
-                                transition: 'all 0.2s'
+                                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)'
                               }}
                             >
                               {group.students.length > 0 ? (
                                 group.students.map(s => (
-                                  <Box key={s.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 1, mb: 0.5 }}>
+                                  <Box key={s.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 3, mb: 0.5 }}>
                                     <Typography sx={{ fontSize: 11 }}>{s.studentNom} {s.studentPrenom}</Typography>
                                     <IconButton size="small" onClick={() => onRemoveStudent(s.id)} sx={{ p: 0.5 }}>
                                       <DeleteIcon sx={{ fontSize: 16 }} />
@@ -392,7 +526,7 @@ export default function SessionsManagementDialog({
                     </Card>
                 )) : (
                   <Box sx={{ width: '100%', py: 5 }}>
-                    <Typography sx={{ color: 'text.secondary', textAlign: 'center', py: 5 }}>Aucun jury disponible. Veuillez créer des jurys dans l'onglet Enseignants du Dashboard.</Typography>
+                    <Typography sx={{ color: 'text.secondary', textAlign: 'center', py: 5 }}>Aucun jury disponible. Créez en un via le champ en haut à droite.</Typography>
                   </Box>
                 )}
               </Stack>
@@ -401,11 +535,11 @@ export default function SessionsManagementDialog({
           </Box>
         </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2, gap: 1, bgcolor: 'background.paper', borderTop: '1px solid rgba(0,0,0,0.08)' }}>
-        <Button variant="text" onClick={onClose} sx={{ borderRadius: 1.5, textTransform: 'none', fontWeight: 600 }}>
+      <DialogActions sx={{ px: 3, py: 2, gap: 1, bgcolor: 'background.paper', borderTop: '1px solid rgba(0,0,0,0.08)', borderRadius: '0 0 5px 5px' }}>
+        <Button variant="contained" disableElevation onClick={onClose} sx={{ borderRadius: 100, textTransform: 'none', fontWeight: 600, px: 4 }}>
           Fermer
         </Button>
       </DialogActions>
-    </Dialog>
+    </Drawer>
   )
 }

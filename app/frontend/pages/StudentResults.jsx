@@ -35,13 +35,26 @@ export default function StudentResults(){
 
   function downloadCsv() {
     if (!results || !results.length) { console.warn('Aucun résultat à exporter'); return }
-    const cols = ['questionnaire', 'score', 'submittedAt']
+    const cols = ['nom', 'prenom', 'année', 'email', 'questionnaire', 'session', 'evaluateur', 'note', 'date']
     const lines = [cols.join(',')]
     for (const r of results) {
       const q = (r.questionnaire && (r.questionnaire.title || r.questionnaire.name)) || r.questionnaireTitle || ''
+      const year = studentInfo?.year || ''
+      const session = r.session?.name || 'N/A'
+      const evaluator = r.evaluator || 'N/A'
       const score = typeof r.score !== 'undefined' ? r.score : (r.result && r.result.score) ? r.result.score : ''
       const submitted = r.submittedAt ? new Date(r.submittedAt).toISOString() : (r.submitted_at ? new Date(r.submitted_at).toISOString() : '')
-      lines.push([`"${q.replace(/"/g,'""')}",` + `${score},` + `"${submitted}"`])
+      lines.push([
+        `"${(studentInfo?.nom || '').replace(/"/g, '""')}"`,
+        `"${(studentInfo?.prenom || '').replace(/"/g, '""')}"`,
+        `"${String(year).replace(/"/g, '""')}"`,
+        `"${studentInfo?.email || ''}"`,
+        `"${q.replace(/"/g,'""')}"`,
+        `"${session.replace(/"/g,'""')}"`,
+        `"${evaluator.replace(/"/g,'""')}"`,
+        score,
+        `"${submitted}"`
+      ].join(','))
     }
     const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
     const url = URL.createObjectURL(blob)
@@ -62,7 +75,7 @@ export default function StudentResults(){
         </Box>
       </Box>
 
-      <Paper sx={{ p: 2 }}>
+      <Paper sx={{ p: 2, borderRadius: 5, boxShadow: 'none', border: '1px solid rgba(0,0,0,0.08)' }}>
         {loading ? (
           <Typography>Chargement...</Typography>
         ) : error ? (
@@ -76,6 +89,8 @@ export default function StudentResults(){
                 <TableHead>
                   <TableRow>
                     <TableCell>Questionnaire</TableCell>
+                    <TableCell>Session</TableCell> {/* Nouvelle colonne */}
+                    <TableCell>Évaluateur</TableCell>
                     <TableCell>Score</TableCell>
                     <TableCell>Soumis le</TableCell>
                     <TableCell>Détails</TableCell>
@@ -87,10 +102,12 @@ export default function StudentResults(){
                     return (
                     <TableRow key={i}>
                       <TableCell>{(r.questionnaire && (r.questionnaire.title || r.questionnaire.name)) || r.questionnaireTitle || 'N/A'}</TableCell>
+                      <TableCell>{(r.session && r.session.name) || 'N/A'}</TableCell> {/* Afficher le nom de la session */}
+                      <TableCell sx={{ fontSize: 13 }}>{r.evaluator || '—'}</TableCell>
                       <TableCell>{typeof r.score !== 'undefined' ? r.score : (r.result && r.result.score) ? r.result.score : '—'}</TableCell>
                       <TableCell>{r.submittedAt ? new Date(r.submittedAt).toLocaleString() : (r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—')}</TableCell>
-                      <TableCell>
-                        {rid ? <Button size="small" variant="text" onClick={() => navigate(`/admin/result/${rid}`)}>Détails</Button> : '—'}
+                      <TableCell> 
+                        {rid ? <Button size="small" variant="text" onClick={() => navigate(`/admin/result/${rid}`)} sx={{ borderRadius: 3, textTransform: 'none' }}>Détails</Button> : '—'}
                       </TableCell>
                     </TableRow>
                   )})}

@@ -31,9 +31,29 @@ router.put('/sessions/:sessionId', requireAdmin, async (req, res) => {
 })
 
 router.delete('/sessions/:sessionId', requireAdmin, async (req, res) => { await prisma.session.delete({ where: { id: Number(req.params.sessionId) } }); res.json({ ok: true }) })
-router.post('/sessions/:sessionId/juries', requireAdmin, async (req, res) => { res.status(201).json(await prisma.sessionJury.create({ data: { sessionId: Number(req.params.sessionId), juryId: Number(req.body.juryId), teacherId: Number(req.body.teacherId) } })) })
+
+router.post('/sessions/:sessionId/juries', requireAdmin, async (req, res) => { 
+  const sessionId = Number(req.params.sessionId)
+  const teacherId = Number(req.body.teacherId)
+  const juryId = Number(req.body.juryId)
+  const existing = await prisma.sessionJury.findFirst({ where: { sessionId, teacherId } })
+  if (existing) return res.status(409).json({ error: 'Cet enseignant est déjà présent dans cette session' })
+  res.status(201).json(await prisma.sessionJury.create({ data: { sessionId, juryId, teacherId } })) 
+})
+
 router.delete('/session-juries/:id', requireAdmin, async (req, res) => { await prisma.sessionJury.delete({ where: { id: Number(req.params.id) } }); res.json({ ok: true }) })
-router.post('/sessions/:sessionId/students', requireAdmin, async (req, res) => { const sid = Number(req.params.sessionId); const stid = Number(req.body.studentId); const jid = Number(req.body.juryId); res.status(201).json(await prisma.sessionStudent.upsert({ where: { sessionId_studentId: { sessionId: sid, studentId: stid } }, update: { juryId: jid }, create: { sessionId: sid, studentId: stid, juryId: jid } })) })
+
+router.post('/sessions/:sessionId/students', requireAdmin, async (req, res) => { 
+  const sid = Number(req.params.sessionId)
+  const stid = Number(req.body.studentId)
+  const jid = Number(req.body.juryId)
+  
+  const existing = await prisma.sessionStudent.findUnique({ where: { sessionId_studentId: { sessionId: sid, studentId: stid } } })
+  if (existing) return res.status(409).json({ error: 'Cet étudiant est déjà présent dans cette session' })
+  
+  res.status(201).json(await prisma.sessionStudent.create({ data: { sessionId: sid, studentId: stid, juryId: jid } })) 
+})
+
 router.delete('/session-students/:id', requireAdmin, async (req, res) => { await prisma.sessionStudent.delete({ where: { id: Number(req.params.id) } }); res.json({ ok: true }) })
 router.patch('/session-students/:id', requireAdmin, async (req, res) => { res.json(await prisma.sessionStudent.update({ where: { id: Number(req.params.id) }, data: { juryId: Number(req.body.juryId) } })) })
 

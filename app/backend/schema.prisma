@@ -23,6 +23,8 @@ model Jury {
 
 model Teacher {
   id       Int     @id @default(autoincrement())
+  name     String
+  lastName String
   email    String  @unique
   password String
   jury     String?
@@ -32,22 +34,28 @@ model Teacher {
 
   questionnaireJuries QuestionnaireJuryMember[]
   sessionJuries SessionJury[]
+  submissions Submission[]
+
+  @@map("teacher")
 }
 
 model Student {
   id           Int     @id @default(autoincrement())
   email        String  @unique
-  password     String
   nom          String?
   prenom       String?
+  year         String?
+  group        String?
   assignedJury String?
   juryId       Int?
   juryRef      Jury?   @relation("JuryStudents", fields: [juryId], references: [id])
-  submissions  Submission[]
-  isTest       Boolean @default(false)
 
   questionnaireStudents QuestionnaireStudentMember[]
   sessionStudents SessionStudent[]
+
+  submissions   Submission[] 
+
+  @@map("student")
 }
 
 model Questionnaire {
@@ -99,6 +107,7 @@ model Session {
   
   juries          SessionJury[]
   students        SessionStudent[]
+  submissions     Submission[] 
   
   @@index([questionnaireId])
 }
@@ -149,6 +158,7 @@ model QuestionCategory {
 model Question {
   id                 Int              @id @default(autoincrement())
   title              String
+  priority Int @default(0)
   questionCategoryId Int
   questionnaire      QuestionCategory @relation(fields: [questionCategoryId], references: [id])
 
@@ -169,16 +179,19 @@ model QuestionElement {
 }
 
 model Submission {
-  id              Int       @id @default(autoincrement())
+  id              Int           @id @default(autoincrement())
+  answers         String        // Stocké en JSON string
+  score           Float?        // La note finale calculée
+  submittedAt     DateTime      @default(now())
+  
   questionnaireId Int
-  questionnaire   Questionnaire @relation(fields: [questionnaireId], references: [id], onDelete: Cascade)
-  
-  studentId Int?
-  student   Student? @relation(fields: [studentId], references: [id], onDelete: SetNull)
-  
-  answers   String? // JSON array of { questionId, answer }
-  submittedAt DateTime @default(now())
-  
-  @@index([questionnaireId])
-  @@index([studentId])
+  questionnaire   Questionnaire @relation(fields: [questionnaireId], references: [id])
+  studentId       Int
+  student         Student       @relation(fields: [studentId], references: [id])
+
+  sessionId       Int?
+  session         Session?      @relation(fields: [sessionId], references: [id])
+
+  teacherId       Int?
+  teacher         Teacher?      @relation(fields: [teacherId], references: [id])
 }
