@@ -38,21 +38,42 @@ export default function AdminImport() {
   function parseCsv(text) {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     const rows = []
-    // On commence à i=1 pour ignorer la ligne d'en-tête (Nom, Prénom, Email)
+   
+
+    if (lines.length < 1) { 
+      return rows;
+    }
+
+    let determinedDelimiter = ','; 
+    const sampleLine = lines[0]; 
+    const partsBySemicolon = sampleLine.split(';');
+    const partsByComma = sampleLine.split(',');
+
+    if (partsBySemicolon.length > partsByComma.length) {
+      determinedDelimiter = ';';
+    } else if (partsByComma.length > partsBySemicolon.length) {
+      determinedDelimiter = ',';
+    } else {
+     
+      if (sampleLine.includes(';')) {
+        determinedDelimiter = ';';
+      }
+    }
+
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i]
-      const parts = line.split(',')
+      const parts = line.split(determinedDelimiter)
       const cleanParts = parts.map(p => p.trim().replace(/^"|"$/g, ''))
 
       if (targetRole === 'teacher_csv') {
-        // Format attendu pour enseignants : nom, prenom, email
+        
         rows.push({
           nom: cleanParts[0] || '',
           prenom: cleanParts[1] || '',
           email: cleanParts[2] || ''
         })
       } else if (targetRole === 'student_csv') {
-        // Format attendu pour étudiants : nom, prenom, année, groupe, email
+       
         rows.push({
           nom: cleanParts[0] || '',
           prenom: cleanParts[1] || '',
@@ -60,6 +81,8 @@ export default function AdminImport() {
           group: cleanParts[3] || '',
           email: cleanParts[4] || ''
         })
+      } else {
+        rows.push(cleanParts)
       }
     }
     return rows
@@ -74,7 +97,7 @@ export default function AdminImport() {
     const lines = [headers.join(',')]
     results.forEach(r => {
       const input = r.input || {}
-      // On ne veut pas exporter les emails techniques ou N/A
+      
       const displayEmail = (r.email || input.email || '');
       const cleanEmail = (displayEmail === 'N/A' || displayEmail.includes('_')) ? '' : displayEmail;
 
@@ -228,12 +251,6 @@ export default function AdminImport() {
         <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
           <Typography variant="h6">Import CSV - étudiants / enseignants</Typography>
           <Stack direction="row" spacing={1}>
-            <Button variant="outlined" size="small" onClick={() => setShowManualAdd(true)} sx={{ borderRadius: 100, textTransform: 'none' }}>
-              + Ajouter un étudiant
-            </Button>
-            <Button variant="outlined" size="small" color="secondary" onClick={handleStudentExportCsv} sx={{ borderRadius: 100, textTransform: 'none' }}>
-              Exporter la liste
-            </Button>
           </Stack>
         </Box>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -248,6 +265,8 @@ export default function AdminImport() {
         <TextField
           select // No borderRadius here, it's handled by the root TextField style
           label="Type d'importation"
+          fullWidth
+          sx={{ mb: 2 }}
           value={targetRole}
           onChange={(e) => {
             setTargetRole(e.target.value);

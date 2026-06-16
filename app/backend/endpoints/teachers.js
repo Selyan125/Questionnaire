@@ -33,13 +33,25 @@ router.post('/teachers', requireAdmin, async (req, res) => {
     // Supporte name/lastName ET nom/prenom pour éviter les erreurs de mapping
     const { email, password, name, lastName, nom, prenom, admin = false } = req.body
 
-    const normalizedEmail = (email && email.trim() !== "") ? normalizeEmail(email) : null
+    let finalEmail;
+    if (typeof email === 'string' && email.trim() !== "") {
+      finalEmail = normalizeEmail(email);
+    } else {
+      // Si l'email est absent ou vide, on génère un identifiant technique unique
+      finalEmail = `teacher_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    }
+    // Assurer que finalEmail est bien une chaîne de caractères pour Prisma,
+    // même si normalizeEmail renvoie quelque chose d'inattendu.
+    if (typeof finalEmail !== 'string') {
+      console.warn(`normalizeEmail returned non-string value for email: ${email}. Falling back to generated email.`);
+      finalEmail = `teacher_${Date.now()}_${Math.floor(Math.random() * 1000)}_fallback`;
+    }
     const plain = typeof password === 'string' && password.trim() ? password : generatePassword(12)
     const hashed = await argon2.hash(plain)
 
     const created = await prisma.teacher.create({
       data: {
-        email: normalizedEmail,
+        email: finalEmail,
         password: hashed,
         name: prenom || name || "",
         lastName: nom || lastName || "",

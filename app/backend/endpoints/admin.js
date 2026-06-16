@@ -1,5 +1,5 @@
 import express from 'express';
-import { prisma, requireAdmin, generatePassword, hashPassword } from '../utils.js';
+import { prisma, requireAdmin, generatePassword, hashPassword, normalizeEmail } from '../utils.js';
 
 const router = express.Router();
 
@@ -11,12 +11,13 @@ router.post('/import', requireAdmin, async (req, res) => {
   for (const userData of users) {
     try {
       let { email, nom, prenom } = userData;
-      if (email === 'N/A') email = '';
+      const normalized = normalizeEmail(email);
+      const isMissing = !normalized || normalized === 'n/a';
       
       let existing = null;
-      if (email && email.trim() !== "") {
-        if (targetRole === 'student') existing = await prisma.student.findUnique({ where: { email } });
-        else if (targetRole === 'teacher') existing = await prisma.teacher.findUnique({ where: { email } });
+      if (!isMissing) {
+        if (targetRole === 'student') existing = await prisma.student.findUnique({ where: { email: normalized } });
+        else if (targetRole === 'teacher') existing = await prisma.teacher.findUnique({ where: { email: normalized } });
       }
 
       const generatedPassword = generatePassword(); 
@@ -30,13 +31,14 @@ router.post('/import', requireAdmin, async (req, res) => {
           });
           results.push({ email: (existing.email && !existing.email.includes('_')) ? existing.email : '', status: 'updated', input: userData, message: 'Étudiant mis à jour' });
         } else {
+          const finalEmail = isMissing ? `student_${Date.now()}_${Math.floor(Math.random() * 1000)}` : normalized;
           await prisma.student.create({
             data: { 
-              email: (email && email.trim() !== "") ? email : null, 
+              email: finalEmail, 
               nom, prenom, year: userData.year, group: userData.group 
             },
           });
-          results.push({ email: (email && !email.includes('_')) ? email : '', status: 'created', input: userData, message: 'Étudiant créé' });
+          results.push({ email: (finalEmail && !finalEmail.includes('_')) ? finalEmail : '', status: 'created', input: userData, message: 'Étudiant créé' });
         }
       } else if (targetRole === 'teacher') {
         if (existing) {
@@ -46,13 +48,14 @@ router.post('/import', requireAdmin, async (req, res) => {
           });
           results.push({ email: (existing.email && !existing.email.includes('_')) ? existing.email : '', status: 'updated', input: userData, message: 'Enseignant mis à jour' });
         } else {
+          const finalEmail = isMissing ? `teacher_${Date.now()}_${Math.floor(Math.random() * 1000)}` : normalized;
           await prisma.teacher.create({
             data: { 
-              email: (email && email.trim() !== "") ? email : null, 
+              email: finalEmail, 
               password: hashedPassword, name: prenom, lastName: nom 
             },
           });
-          results.push({ email: (email && !email.includes('_')) ? email : '', status: 'created', password: generatedPassword, input: userData, message: 'Enseignant créé' });
+          results.push({ email: (finalEmail && !finalEmail.includes('_')) ? finalEmail : '', status: 'created', password: generatedPassword, input: userData, message: 'Enseignant créé' });
         }
       } else {
         results.push({ email: email || '', status: 'error', input: userData, reason: 'Rôle cible inconnu' });
@@ -77,7 +80,8 @@ router.post('/import-all', requireAdmin, async (req, res) => {
       // Import Teachers
       for (const teacherData of teachers) {
         try {
-          const existingTeacher = await tx.teacher.findUnique({ where: { email: teacherData.email } });
+          const teacherEmail = normalizeEmail(teacherData.email) || `teacher_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const existingTeacher = await tx.teacher.findUnique({ where: { email: teacherEmail } });
           if (existingTeacher) {
             await tx.teacher.update({
               where: { id: existingTeacher.id },
@@ -93,7 +97,7 @@ router.post('/import-all', requireAdmin, async (req, res) => {
             const hashedPassword = await hashPassword(newPassword);
             await tx.teacher.create({
               data: {
-                email: teacherData.email,
+                email: teacherEmail,
                 name: teacherData.name,
                 lastName: teacherData.lastName,
                 password: hashedPassword,
@@ -110,7 +114,8 @@ router.post('/import-all', requireAdmin, async (req, res) => {
       // Import Students
       for (const studentData of students) {
         try {
-          const existingStudent = await tx.student.findUnique({ where: { email: studentData.email } });
+          const studentEmail = normalizeEmail(studentData.email) || `student_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+          const existingStudent = await tx.student.findUnique({ where: { email: studentEmail } });
           if (existingStudent) {
             await tx.student.update({
               where: { id: existingStudent.id },
@@ -125,7 +130,7 @@ router.post('/import-all', requireAdmin, async (req, res) => {
           } else {
             await tx.student.create({
               data: {
-                email: studentData.email,
+                email: studentEmail,
                 nom: studentData.nom,
                 prenom: studentData.prenom,
                 year: studentData.year, // Ajout du champ 'year'
