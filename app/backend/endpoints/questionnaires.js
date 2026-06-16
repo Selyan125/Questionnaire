@@ -100,6 +100,33 @@ router.get('/results/all-csv', requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Export failed' }); }
 });
 
+router.get('/students/export-csv', requireAdmin, async (req, res) => {
+  try {
+    const students = await prisma.student.findMany({
+      orderBy: [{ year: 'asc' }, { nom: 'asc' }]
+    });
+
+    const cols = ['Nom', 'Prénom', 'Année', 'Groupe', 'Email'];
+    const lines = [cols.join(',')];
+
+    students.forEach(s => {
+      // On applique le même filtre que pour les enseignants pour masquer les identifiants techniques
+      const cleanEmail = (s.email && s.email.includes('_')) ? '' : (s.email || '');
+      lines.push([
+        `"${(s.nom || '').replace(/"/g, '""')}"`,
+        `"${(s.prenom || '').replace(/"/g, '""')}"`,
+        `"${(s.year || '').replace(/"/g, '""')}"`,
+        `"${(s.group || '').replace(/"/g, '""')}"`,
+        `"${cleanEmail.replace(/"/g, '""')}"`
+      ].join(','));
+    });
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename=export_etudiants.csv');
+    res.send(lines.join('\n'));
+  } catch (err) { res.status(500).json({ error: 'Export failed' }); }
+});
+
 router.get('/', requireTeacher, async (req, res) => {
   const teacherId = Number(req.user.id);
   const questionnaires = await prisma.questionnaire.findMany({ where: req.user.admin ? {} : { sessions: { some: { active: true, juries: { some: { teacherId } } } } }, orderBy: { id: 'desc' }, include: { categories: true, sessions: { where: req.user.admin ? {} : { active: true, juries: { some: { teacherId } } }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } } } } })
@@ -505,6 +532,19 @@ router.get('/:id/results', requireTeacher, async (req, res) => {
 apiRouter.post('/questionnaires/:id/categories', requireAdmin, async (req, res) => { res.status(201).json(await prisma.questionCategory.create({ data: { title: req.body.title, currentNote: req.body.currentNote || 0, questionnaireId: Number(req.params.id) } })) })
 apiRouter.put('/categories/:id', requireAdmin, async (req, res) => { res.json(await prisma.questionCategory.update({ where: { id: Number(req.params.id) }, data: { title: req.body.title, currentNote: req.body.currentNote } })) })
 apiRouter.delete('/categories/:id', requireAdmin, async (req, res) => { const id = Number(req.params.id); await prisma.$transaction(async (tx) => { const qs = await tx.question.findMany({ where: { questionCategoryId: id }, select: { id: true } }); for (const q of qs) await tx.questionElement.deleteMany({ where: { questionId: q.id } }); await tx.question.deleteMany({ where: { questionCategoryId: id } }); await tx.questionCategory.delete({ where: { id } }); }); res.status(204).end() })
+
+apiRouter.post('/students', requireAdmin, async (req, res) => {
+  try {
+    const { nom, prenom, year, group, email } = req.body;
+    const finalEmail = (email && email.trim()) ? email.trim() : `student_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const student = await prisma.student.create({
+      data: { nom: nom || '', prenom: prenom || '', year: year || '', group: group || '', email: finalEmail }
+    });
+    res.status(201).json(student);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la création de l\'étudiant', details: err.message });
+  }
+});
 
 apiRouter.post('/questions/:id/duplicate', requireAdmin, async (req, res) => {
   try {

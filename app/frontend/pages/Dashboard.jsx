@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Menu, MenuItem, Tooltip, Box, Paper, Stack, Typography, Grid, IconButton, Avatar, Button, Divider, Skeleton, List, ListItemButton, ListItemIcon, ListItemText, Card, CardContent, Checkbox, Table, TableHead, TableRow, TableCell, TableBody, Dialog, DialogTitle, DialogContent, DialogActions } from '@mui/material';
+import { Menu, MenuItem, Tooltip, Box, Paper, Stack, Typography, Grid, IconButton, Avatar, Button, Divider, Skeleton, List, ListItemButton, ListItemIcon, ListItemText, Card, CardContent, Checkbox, Table, TableHead, TableRow, TableCell, TableBody, Dialog, DialogTitle, DialogContent, DialogActions, TextField } from '@mui/material';
 import LogoutIcon from '@mui/icons-material/Logout';
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
@@ -54,6 +54,11 @@ export default function Dashboard() {
   const [importMessage, setImportMessage] = useState(null)
   const [exporting, setExporting] = useState(false)
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false)
+
+  // States pour l'ajout manuel d'un étudiant depuis le dashboard
+  const [showStudentAdd, setShowStudentAdd] = useState(false)
+  const [newStudent, setNewStudent] = useState({ nom: '', prenom: '', year: '', group: '', email: '' })
+  const [isAddingStudent, setIsAddingStudent] = useState(false)
 
   // Menu states for cards
   const [exportAnchor, setExportAnchor] = useState(null);
@@ -123,6 +128,21 @@ export default function Dashboard() {
     } finally {
       setLoadingStats(false)
     }
+  }
+
+  async function handleQuickAddStudent() {
+    if (!newStudent.nom || !newStudent.prenom) {
+      alert('Nom et prénom requis.');
+      return;
+    }
+    setIsAddingStudent(true);
+    try {
+      await apiFetch('/api/students', { method: 'POST', json: newStudent });
+      setNewStudent({ nom: '', prenom: '', year: '', group: '', email: '' });
+      setShowStudentAdd(false);
+      loadDashboard(); // Recharger la liste
+    } catch (err) { alert(err.message || 'Erreur lors de l\'ajout'); }
+    finally { setIsAddingStudent(false); }
   }
 
   async function deleteQuestionnaire(id) {
@@ -225,6 +245,22 @@ export default function Dashboard() {
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } catch (e) { alert("Erreur lors de l'export des résultats") }
+  }
+
+  async function handleStudentExportCsv() {
+    try {
+      const resp = await apiFetch('/api/questionnaires/students/export-csv')
+      if (!resp.ok) throw new Error("Erreur export")
+      const blob = await resp.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `export_etudiants_${new Date().toISOString().split('T')[0]}.csv`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) { alert("Erreur lors de l'export des étudiants") }
   }
 
   async function handleGlobalExport() {
@@ -567,7 +603,18 @@ export default function Dashboard() {
 
           {selectedMenu === 1 && <TeachersView />}
 
-          {selectedMenu === 2 && <StudentsView />}
+          {selectedMenu === 2 && (
+            <Box>
+              <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+                <Typography variant="h5" sx={{ fontWeight: 800, color: '#1a1a1b' }}>Gestion des étudiants</Typography>
+                <Stack direction="row" spacing={1}>
+                  <Button variant="contained" startIcon={<AddIcon />} onClick={() => setShowStudentAdd(true)} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Ajouter un étudiant</Button>
+                  <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={handleStudentExportCsv} sx={{ borderRadius: 100, textTransform: 'none' }}>Exporter la liste (CSV)</Button>
+                </Stack>
+              </Box>
+              <StudentsView />
+            </Box>
+          )}
 
           {selectedMenu === 3 && isAdmin && (
             <>
@@ -604,6 +651,8 @@ export default function Dashboard() {
                     Exporter tous les résultats
                   </Button>
                 </Paper>
+
+        
               </Stack>
             </>
           )}
@@ -691,6 +740,25 @@ export default function Dashboard() {
           <ListItemText primary="Supprimer" primaryTypographyProps={{ fontSize: 14, fontWeight: 600 }} />
         </MenuItem>
       </Menu>
+
+      <Dialog open={showStudentAdd} onClose={() => setShowStudentAdd(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Ajouter un étudiant</DialogTitle>
+        <DialogContent>
+          <Stack spacing={2} sx={{ mt: 1 }}>
+            <TextField label="Nom" value={newStudent.nom} onChange={e => setNewStudent({...newStudent, nom: e.target.value})} fullWidth />
+            <TextField label="Prénom" value={newStudent.prenom} onChange={e => setNewStudent({...newStudent, prenom: e.target.value})} fullWidth />
+            <TextField label="Année" value={newStudent.year} onChange={e => setNewStudent({...newStudent, year: e.target.value})} fullWidth />
+            <TextField label="Groupe" value={newStudent.group} onChange={e => setNewStudent({...newStudent, group: e.target.value})} fullWidth />
+            <TextField label="Email (optionnel)" value={newStudent.email} onChange={e => setNewStudent({...newStudent, email: e.target.value})} fullWidth />
+          </Stack>
+        </DialogContent>
+        <DialogActions sx={{ p: 2, gap: 1 }}>
+          <Button onClick={() => setShowStudentAdd(false)} sx={{ borderRadius: 100, textTransform: 'none' }}>Annuler</Button>
+          <Button variant="contained" onClick={handleQuickAddStudent} disabled={isAddingStudent} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>
+            {isAddingStudent ? 'Ajout...' : 'Ajouter'}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       <Dialog open={logoutDialogOpen} onClose={() => setLogoutDialogOpen(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }}>
         <DialogTitle sx={{ fontWeight: 700, color: '#1a1a1b' }}>Déconnexion</DialogTitle>

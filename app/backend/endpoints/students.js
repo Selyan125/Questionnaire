@@ -14,6 +14,19 @@ router.get('/', requireAdmin, async (req, res) => {
   }
 })
 
+router.post('/', requireAdmin, async (req, res) => {
+  try {
+    const { nom, prenom, year, group, email } = req.body;
+    const finalEmail = (email && email.trim()) ? email.trim() : `student_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const student = await prisma.student.create({
+      data: { nom: nom || '', prenom: prenom || '', year: year || '', group: group || '', email: finalEmail }
+    });
+    res.status(201).json(student);
+  } catch (err) {
+    res.status(500).json({ error: 'Erreur lors de la création de l\'étudiant', details: err.message });
+  }
+});
+
 router.get('/:id/results', requireTeacher, async (req, res) => {
   try {
     const id = Number(req.params.id)
