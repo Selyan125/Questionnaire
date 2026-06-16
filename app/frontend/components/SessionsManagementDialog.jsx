@@ -37,6 +37,7 @@ import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
 import { DatePicker } from '@mui/x-date-pickers/DatePicker'
 import dayjs from 'dayjs'
+import 'dayjs/locale/fr'
 import DeleteIcon from '@mui/icons-material/Delete'
 import AddIcon from '@mui/icons-material/Add'
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator'
@@ -58,6 +59,7 @@ export default function SessionsManagementDialog({
   onAddStudent,
   onRemoveStudent,
   onAddJuryMaster,
+  onDeleteJuryMaster,
   onSelectSession,
 }) {
   const [selectedSessionTab, setSelectedSessionTab] = useState(0)
@@ -252,13 +254,18 @@ export default function SessionsManagementDialog({
                     }}
                   >
                     <DragIndicatorIcon sx={{ color: 'text.disabled', mr: 1, fontSize: 20 }} />
+                    {(() => {
+                      const fullname = `${item.name || ''} ${item.lastName || ''}`.trim()
+                      const email = (item.email && !item.email.includes('_')) ? item.email : ''
+                      return (
                     <ListItemText
                       sx={{ m: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-                      primary={item.email}
+                      primary={fullname || email}
                       slotProps={{
                         primary: { noWrap: true, sx: { fontSize: 14, fontWeight: 500 } }
                       }}
                     />
+                    ) })()}
                   </ListItem>
                 ))
               ) : (
@@ -287,7 +294,7 @@ export default function SessionsManagementDialog({
                         <DragIndicatorIcon sx={{ color: 'text.disabled', mr: 1, fontSize: 20 }} />
                         <ListItemText
                           sx={{ m: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}
-                          primary={`${item.nom || ''} ${item.prenom || ''}`}
+                          primary={`${item.prenom || ''} ${item.nom || ''}`.trim()}
                           slotProps={{
                             primary: {
                               noWrap: true,
@@ -408,9 +415,10 @@ export default function SessionsManagementDialog({
                   size="small"
                   sx={{ flex: 1 }}
                 />
-                <LocalizationProvider dateAdapter={AdapterDayjs}>
+                <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="fr">
                   <DatePicker
                     label="Date"
+                    format="DD/MM/YYYY"
                     value={editingDate[currentSession.id] ? dayjs(editingDate[currentSession.id]) : (currentSession.date ? dayjs(currentSession.date) : null)}
                     onChange={(newValue) => {
                       const formatted = newValue && newValue.isValid() ? newValue.format('YYYY-MM-DD') : '';
@@ -447,9 +455,23 @@ export default function SessionsManagementDialog({
                 {juryGroups.length > 0 ? juryGroups.map((group, idx) => (
                     <Card key={group.juryId || idx} sx={{ borderRadius: '24px', width: '100%', border: '1px solid rgba(0,0,0,0.06)', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' }}>
                       <CardContent sx={{ p: 2, flex: 1 }}>
-                        <Typography sx={{ fontWeight: 700, mb: 2, color: 'primary.main', fontSize: 14 }}>
-                          {group.juryName}
-                        </Typography>
+                        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 2 }}>
+                          <Typography sx={{ fontWeight: 700, color: 'primary.main', fontSize: 14 }}>
+                            {group.juryName}
+                          </Typography>
+                          {typeof onDeleteJuryMaster === 'function' && (
+                            <Tooltip title="Supprimer ce modèle de jury">
+                              <IconButton 
+                                size="small" 
+                                color="error" 
+                                onClick={() => { if(window.confirm(`Supprimer le jury "${group.juryName}" ?`)) onDeleteJuryMaster(group.juryId) }}
+                                sx={{ mt: -0.5, mr: -0.5, opacity: 0.5, '&:hover': { opacity: 1 } }}
+                              >
+                                <DeleteIcon sx={{ fontSize: 18 }} />
+                              </IconButton>
+                            </Tooltip>
+                          )}
+                        </Box>
                         
                         <Box sx={{ display: 'flex', flexDirection: 'row', gap: 2 }}>
                           <Box sx={{ flex: 1 }}>
@@ -475,7 +497,13 @@ export default function SessionsManagementDialog({
                               {group.teachers.length > 0 ? (
                                 group.teachers.map(t => (
                                   <Box key={t.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 3 }}>
-                                    <Typography sx={{ fontSize: 12, fontWeight: 500 }}>{t.teacherEmail}</Typography>
+                                    <Typography sx={{ fontSize: 12, fontWeight: 500 }}>
+                                      {(() => {
+                                        const fullname = `${t.teacherName || ''} ${t.teacherLastName || ''}`.trim()
+                                        const email = (t.teacherEmail && !t.teacherEmail.includes('_')) ? t.teacherEmail : ''
+                                        return fullname || email
+                                      })()}
+                                    </Typography>
                                     <IconButton size="small" onClick={() => onRemoveJury(t.id)} sx={{ p: 0.25 }}>
                                       <DeleteIcon sx={{ fontSize: 16 }} />
                                     </IconButton>
@@ -510,7 +538,7 @@ export default function SessionsManagementDialog({
                               {group.students.length > 0 ? (
                                 group.students.map(s => (
                                   <Box key={s.id} sx={{ p: 0.75, px: 1, bgcolor: 'background.paper', border: '1px solid rgba(0,0,0,0.08)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderRadius: 3, mb: 0.5 }}>
-                                    <Typography sx={{ fontSize: 11 }}>{s.studentNom} {s.studentPrenom}</Typography>
+                                    <Typography sx={{ fontSize: 11 }}>{s.studentPrenom} {s.studentNom}</Typography>
                                     <IconButton size="small" onClick={() => onRemoveStudent(s.id)} sx={{ p: 0.5 }}>
                                       <DeleteIcon sx={{ fontSize: 16 }} />
                                     </IconButton>

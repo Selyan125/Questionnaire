@@ -43,7 +43,7 @@ export default function StudentResults(){
       const session = r.session?.name || 'N/A'
       const evaluator = r.evaluator || 'N/A'
       const score = typeof r.score !== 'undefined' ? r.score : (r.result && r.result.score) ? r.result.score : ''
-      const submitted = r.submittedAt ? new Date(r.submittedAt).toISOString() : (r.submitted_at ? new Date(r.submitted_at).toISOString() : '')
+      const submitted = r.submittedAt ? new Date(r.submittedAt).toLocaleDateString('fr-FR') : (r.submitted_at ? new Date(r.submitted_at).toLocaleDateString('fr-FR') : '')
       lines.push([
         `"${(studentInfo?.nom || '').replace(/"/g, '""')}"`,
         `"${(studentInfo?.prenom || '').replace(/"/g, '""')}"`,
@@ -105,7 +105,7 @@ export default function StudentResults(){
                       <TableCell>{(r.session && r.session.name) || 'N/A'}</TableCell> {/* Afficher le nom de la session */}
                       <TableCell sx={{ fontSize: 13 }}>{r.evaluator || '—'}</TableCell>
                       <TableCell>{typeof r.score !== 'undefined' ? r.score : (r.result && r.result.score) ? r.result.score : '—'}</TableCell>
-                      <TableCell>{r.submittedAt ? new Date(r.submittedAt).toLocaleString() : (r.submitted_at ? new Date(r.submitted_at).toLocaleString() : '—')}</TableCell>
+                      <TableCell>{r.submittedAt ? new Date(r.submittedAt).toLocaleDateString('fr-FR') : (r.submitted_at ? new Date(r.submitted_at).toLocaleDateString('fr-FR') : '—')}</TableCell>
                       <TableCell> 
                         {rid ? <Button size="small" variant="text" onClick={() => navigate(`/admin/result/${rid}`)} sx={{ borderRadius: 3, textTransform: 'none' }}>Détails</Button> : '—'}
                       </TableCell>

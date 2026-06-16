@@ -18,7 +18,10 @@ router.get('/teachers', requireAdmin, async (req, res) => {
         // Si jury est une relation, on ne peut pas faire jury: true
       }
     })
-    res.json(teachers)
+    res.json(teachers.map(t => ({
+      ...t,
+      email: (t.email && t.email.includes('_')) ? '' : t.email
+    })))
   } catch (error) {
     console.error("Détails de l'erreur /api/teachers :", error);
     res.status(500).json({ error: 'Erreur lors de la récupération des enseignants', details: error.message });
@@ -29,9 +32,8 @@ router.post('/teachers', requireAdmin, async (req, res) => {
   try {
     // Supporte name/lastName ET nom/prenom pour éviter les erreurs de mapping
     const { email, password, name, lastName, nom, prenom, admin = false } = req.body
-    if (!email) return res.status(400).json({ error: 'email is required' })
 
-    const normalizedEmail = normalizeEmail(email) // Use normalizeEmail from utils
+    const normalizedEmail = (email && email.trim() !== "") ? normalizeEmail(email) : null
     const plain = typeof password === 'string' && password.trim() ? password : generatePassword(12)
     const hashed = await argon2.hash(plain)
 
@@ -41,7 +43,7 @@ router.post('/teachers', requireAdmin, async (req, res) => {
         password: hashed,
         name: prenom || name || "",
         lastName: nom || lastName || "",
-        admin: !!admin
+        admin: false // On ignore le flag admin lors d'une création classique
       }
     })
 
@@ -150,13 +152,42 @@ router.delete('/teachers', requireAdmin, async (req, res) => {
 
 router.get('/juries', requireTeacher, async (req, res) => {
   try {
-    const juries = await prisma.jury.findMany({ orderBy: { name: 'asc' }, include: { teachers: { select: { id: true, email: true } }, students: { select: { id: true, email: true } } } })
-    res.json(juries.map(jury => ({ id: jury.id, name: jury.name, teachers: jury.teachers, students: jury.students })))
+    const juries = await prisma.jury.findMany({ 
+      orderBy: { name: 'asc' }, 
+      include: { 
+        teachers: { select: { id: true, email: true } }, 
+        students: { select: { id: true, email: true } } 
+      } 
+    })
+    res.json(juries.map(jury => ({ 
+      id: jury.id, name: jury.name, 
+      teachers: jury.teachers.map(t => ({ ...t, email: (t.email && t.email.includes('_')) ? '' : t.email })), 
+      students: jury.students.map(s => ({ ...s, email: (s.email && s.email.includes('_')) ? '' : s.email })) 
+    })))
   } catch { res.status(500).json({ error: 'Could not fetch juries' }) }
 })
 
 router.post('/juries', requireAdmin, async (req, res) => {
   try { const { name } = req.body; if (!name) return res.status(400).json({ error: 'name required' }); try { await prisma.jury.create({ data: { name } }) } catch (e) { if (!(e && e.code === 'P2002')) throw e }; res.status(201).json({ name }) } catch { res.status(500).json({ error: 'Could not create jury' }) }
+})
+
+router.delete('/juries/:id', requireAdmin, async (req, res) => {
+  try {
+    const id = Number(req.params.id)
+    await prisma.$transaction([
+      // On détache le jury des enseignants et étudiants
+      prisma.teacher.updateMany({ where: { juryId: id }, data: { juryId: null } }),
+      prisma.student.updateMany({ where: { juryId: id }, data: { juryId: null } }),
+      // On supprime les assignations dans les sessions
+      prisma.sessionJury.deleteMany({ where: { juryId: id } }),
+      prisma.sessionStudent.deleteMany({ where: { juryId: id } }),
+      // Enfin on supprime le jury
+      prisma.jury.delete({ where: { id } })
+    ])
+    res.json({ success: true })
+  } catch (error) {
+    res.status(500).json({ error: 'Erreur lors de la suppression du jury', details: error.message })
+  }
 })
 
 export default router

@@ -33,18 +33,60 @@ export default function AdminImport() {
   function parseCsv(text) {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean)
     const rows = []
-    for (const line of lines) {
-      const parts = line.split(',').map(p => p.trim())
-      // expect at least email in first column
-      rows.push({ 
-        email: parts[0], 
-        nom: parts[1] || '', 
-        prenom: parts[2] || '',
-        year: parts[3] || '',
-        group: parts[4] || ''
-      })
+    // On commence à i=1 pour ignorer la ligne d'en-tête (Nom, Prénom, Email)
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      const parts = line.split(',')
+      const cleanParts = parts.map(p => p.trim().replace(/^"|"$/g, ''))
+
+      if (targetRole === 'teacher_csv') {
+        // Format attendu pour enseignants : nom, prenom, email
+        rows.push({
+          nom: cleanParts[0] || '',
+          prenom: cleanParts[1] || '',
+          email: cleanParts[2] || ''
+        })
+      } else if (targetRole === 'student_csv') {
+        // Format attendu pour étudiants : nom, prenom, année, groupe, email
+        rows.push({
+          nom: cleanParts[0] || '',
+          prenom: cleanParts[1] || '',
+          year: cleanParts[2] || '',
+          group: cleanParts[3] || '',
+          email: cleanParts[4] || ''
+        })
+      }
     }
     return rows
+  }
+
+  const handleExportResultsCsv = () => {
+    if (!results || !results.length) return
+    const isTeacher = targetRole === 'teacher_csv'
+    const headers = ['Nom', 'Prénom', 'Email']
+    if (isTeacher) headers.push('Mot de passe')
+    
+    const lines = [headers.join(',')]
+    results.forEach(r => {
+      const input = r.input || {}
+      // On ne veut pas exporter les emails techniques ou N/A
+      const displayEmail = (r.email || input.email || '');
+      const cleanEmail = (displayEmail === 'N/A' || displayEmail.includes('_')) ? '' : displayEmail;
+
+      const row = [
+        `"${(input.nom || '').replace(/"/g, '""')}"`,
+        `"${(input.prenom || '').replace(/"/g, '""')}"`,
+        `"${cleanEmail.replace(/"/g, '""')}"`
+      ]
+      if (isTeacher) row.push(`"${(r.password || '').replace(/"/g, '""')}"`)
+      lines.push(row.join(','))
+    })
+    
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = `resultats_import_${targetRole}_${new Date().toISOString().split('T')[0]}.csv`
+    link.click()
   }
 
   const handleDragOver = (e) => {
@@ -104,7 +146,7 @@ export default function AdminImport() {
         const payload = JSON.parse(fileContent);
         // This API endpoint needs to be created in the backend
         data = await apiJson('/api/admin/import-all', { method: 'POST', json: payload });
-        setResults([{ status: 'success', message: data.message || 'Importation complète réussie.' }]);
+        setResults([{ status: 'success', reason: data.message || 'Importation complète réussie.' }]);
       } else if (targetRole === 'questions_csv') {
         data = await apiJson('/api/questionnaires/import-questions-csv', {
           method: 'POST',
@@ -114,7 +156,7 @@ export default function AdminImport() {
             config: qConfig
           }
         })
-        setResults([{ status: 'success', message: 'Questions importées avec succès.' }])
+        setResults([{ status: 'success', reason: 'Questions importées avec succès.' }])
         if (data.questionnaireId) navigate(`/admin/question-manager/${data.questionnaireId}`)
       } else { // CSV import for students or teachers
         data = await importUsers({ targetRole: targetRole.replace('_csv', ''), users: parseCsv(csv) });
@@ -124,7 +166,7 @@ export default function AdminImport() {
       console.error('Import error:', err);
       const errorMsg = err.message || 'Erreur lors de l\'importation';
       setError(errorMsg);
-      setResults([{ status: 'error', message: errorMsg }]);
+      setResults([{ status: 'error', reason: errorMsg }]);
     } finally {
       setLoading(false)
     }
@@ -153,7 +195,9 @@ export default function AdminImport() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           {targetRole === 'full_json'
             ? 'Sélectionnez un fichier JSON contenant une sauvegarde complète (questionnaires, étudiants, enseignants).'
-            : 'Format CSV: email,nom,prenom,année,groupe'
+            : targetRole === 'teacher_csv'
+              ? 'Format CSV : nom, prenom, email (optionnel)'
+              : 'Format CSV : nom, prenom, année, groupe, email (optionnel)'
           }
         </Typography>
 
@@ -256,15 +300,25 @@ export default function AdminImport() {
 
         {error && <Typography color="error" sx={{ mb: 2 }}>{error}</Typography>}
 
-        <Button variant="contained" onClick={handleImport} disabled={loading || (!csv && !jsonFile)} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 4 }}>{loading ? 'Importation...' : 'Importer'}</Button>
+        <Stack direction="row" spacing={2} sx={{ mt: 2 }}>
+          <Button variant="contained" onClick={handleImport} disabled={loading || (!csv && !jsonFile)} disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 4 }}>
+            {loading ? 'Importation...' : 'Importer'}
+          </Button>
+          {results && results.length > 0 && (
+            <Button variant="outlined" color="primary" onClick={handleExportResultsCsv} sx={{ borderRadius: 100, textTransform: 'none', px: 4 }}>
+              Exporter ces résultats (avec mots de passe)
+            </Button>
+          )}
+        </Stack>
 
         {results && (
           <Box sx={{ mt: 3 }}>
-            <Typography variant="subtitle1">Résultats</Typography>
+            <Typography variant="h6" sx={{ mb: 1, fontWeight: 700 }}>Détails de l'importation</Typography>
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Email / Élément</TableCell>
+                  <TableCell>Nom / Prénom</TableCell>
+                  <TableCell>Email / Login</TableCell>
                   <TableCell>Statut</TableCell>
                   {targetRole === 'teacher_csv' && <TableCell>Mot de passe (Enseignants uniquement)</TableCell>}
                 </TableRow>
@@ -272,8 +326,18 @@ export default function AdminImport() {
               <TableBody>
                 {results.map((r, i) => (
                   <TableRow key={i}>
-                    <TableCell>{r.email || (r.input && r.input.email) || r.message || ''}</TableCell>
-                    <TableCell>{r.status}{r.reason ? ` (${r.reason})` : ''}</TableCell>
+                    <TableCell>{`${r.input?.nom || ''} ${r.input?.prenom || ''}`}</TableCell>
+                    <TableCell>
+                      {/* Masquer les emails techniques (contenant _) ou N/A */}
+                      {r.email && !r.email.includes('_') && r.email !== 'N/A' 
+                        ? r.email 
+                        : (r.input?.email !== 'N/A' ? r.input?.email : '')}
+                    </TableCell>
+                    <TableCell>
+                      <Typography color={['success', 'created', 'updated'].includes(r.status) ? 'success.main' : 'error.main'} sx={{ fontWeight: 600, fontSize: 14 }}>
+                        {['success', 'created', 'updated'].includes(r.status) ? 'Réussi' : 'Erreur'}{(r.reason || r.message) ? ` : ${r.reason || r.message}` : ''}
+                      </Typography>
+                    </TableCell>
                     {targetRole === 'teacher_csv' && <TableCell>{r.password || ''}</TableCell>}
                   </TableRow>
                 ))}

@@ -4,6 +4,7 @@ import AddIcon from '@mui/icons-material/Add'
 import EditIcon from '@mui/icons-material/Edit'
 import LockResetIcon from '@mui/icons-material/LockReset'
 import DeleteIcon from '@mui/icons-material/Delete'
+import FileDownloadIcon from '@mui/icons-material/FileDownload'
 import { listTeachers, createTeacher, resetTeacherPassword, deleteTeachers, updateTeacher } from '../api/teachers.js'
 
 export default function TeachersView() {
@@ -17,6 +18,7 @@ export default function TeachersView() {
   const [newNom, setNewNom] = useState('')
   const [newPrenom, setNewPrenom] = useState('')
   const [newPassword, setNewPassword] = useState('')
+  const [resetPasswordValue, setResetPasswordValue] = useState('')
   const [generatedPassword, setGeneratedPassword] = useState('')
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
 
@@ -40,7 +42,11 @@ export default function TeachersView() {
     const last = t.nom || t.lastName || ''
     const first = t.prenom || t.name || t.firstName || ''
     const fullname = [last, first].filter(Boolean).join(' ').trim()
-    return fullname ? `${fullname} (${t.email || ''})` : (t.email || '')
+
+    // On masque l'email s'il est technique (contient un underscore) ou N/A
+    const email = (t.email && !t.email.includes('_') && t.email !== 'N/A') ? t.email : ''
+
+    return fullname ? (email ? `${fullname} (${email})` : fullname) : email
   }
 
   async function load() {
@@ -108,7 +114,8 @@ export default function TeachersView() {
   async function handleResetPassword() {
     if (!teacherToReset) return
     try {
-      const result = await resetTeacherPassword(teacherToReset.id)
+      const result = await resetTeacherPassword(teacherToReset.id, resetPasswordValue)
+      setResetPasswordValue('')
       if (result?.password) {
         setGeneratedPassword(result.password)
         setConfirmResetOpen(false)
@@ -135,11 +142,45 @@ export default function TeachersView() {
     setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   }
 
+  const handleExportCsv = () => {
+    const exportable = teachers.filter(t => t.id !== 1)
+    if (!exportable.length) return
+    const headers = ['Nom', 'Prénom', 'Email']
+    const csvContent = [
+      headers.join(','),
+      ...exportable.map(t => [
+        `"${(t.nom || t.lastName || '').replace(/"/g, '""')}"`,
+        `"${(t.prenom || t.name || t.firstName || '').replace(/"/g, '""')}"`,
+        `"${(t.email || '').replace(/"/g, '""')}"`
+      ].join(','))
+    ].join('\n')
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.setAttribute('href', url)
+    link.setAttribute('download', `liste_enseignants_${new Date().toISOString().split('T')[0]}.csv`)
+    link.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const toggleSelectAll = () => {
+    const selectable = teachers.filter(t => t.id !== 1)
+    if (selectedIds.length === selectable.length) setSelectedIds([])
+    else setSelectedIds(selectable.map(t => t.id))
+  }
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
         <Box sx={{ display: 'flex', gap: 1.5, alignItems: 'center' }}>
           <Button variant="contained" disableElevation startIcon={<AddIcon />} onClick={() => setAddOpen(true)} sx={{ textTransform: 'none', borderRadius: 100, px: 3 }}>Ajouter</Button>
+          <Button variant="outlined" startIcon={<FileDownloadIcon />} onClick={handleExportCsv} sx={{ textTransform: 'none', borderRadius: 100, px: 3 }}>Exporter CSV</Button>
+          <FormControlLabel
+            control={<Checkbox size="small" checked={teachers.length > 1 && selectedIds.length === teachers.filter(t => t.id !== 1).length} indeterminate={selectedIds.length > 0 && selectedIds.length < teachers.filter(t => t.id !== 1).length} onChange={toggleSelectAll} />}
+            label={<Typography sx={{ fontSize: 14, fontWeight: 600 }}>Tout sélectionner</Typography>}
+            sx={{ ml: 1 }}
+          />
           {selectedIds.length > 0 && (
             <Button variant="outlined" color="error" startIcon={<DeleteIcon />} onClick={handleBulkDelete} sx={{ textTransform: 'none', borderRadius: 100, px: 2 }}>
               Supprimer ({selectedIds.length})
@@ -177,20 +218,20 @@ export default function TeachersView() {
                       <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{t.admin ? 'Administrateur' : 'Enseignant'}</Typography>
                     </Box>
                   </Box>
-                  {t.id !== 1 && (
-                    <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Tooltip title="Modifier">
-                        <IconButton size="small" color="primary" onClick={() => handleEditTeacher(t)}>
-                          <EditIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
+                  <Box sx={{ display: 'flex', gap: 1 }}>
+                    <Tooltip title="Modifier">
+                      <IconButton size="small" color="primary" onClick={() => handleEditTeacher(t)}>
+                        <EditIcon fontSize="small" />
+                      </IconButton>
+                    </Tooltip>
+                    {t.id !== 1 && (
                       <Tooltip title="Supprimer">
                         <IconButton size="small" color="error" onClick={() => { setSelectedIds([t.id]); handleBulkDelete(); }}>
                           <DeleteIcon fontSize="small" />
                         </IconButton>
                       </Tooltip>
-                    </Box>
-                  )}
+                    )}
+                  </Box>
                 </Box>
               ))}
             </Box>
@@ -273,10 +314,19 @@ export default function TeachersView() {
       <Dialog open={confirmResetOpen} onClose={() => setConfirmResetOpen(false)} PaperProps={{ sx: { borderRadius: 7, p: 1 } }}>
         <DialogTitle sx={{ color: '#1a1a1b', fontWeight: 700 }}>Réinitialiser le mot de passe</DialogTitle>
         <DialogContent>
-          <Typography>Voulez-vous vraiment réinitialiser le mot de passe de <strong>{teacherToReset?.email}</strong> ?</Typography>
+          <Typography sx={{ mb: 2 }}>Voulez-vous vraiment réinitialiser le mot de passe de <strong>{teacherToReset?.email}</strong> ?</Typography>
+          <TextField
+            fullWidth
+            label="Nouveau mot de passe (optionnel)"
+            type="password"
+            value={resetPasswordValue}
+            onChange={(e) => setResetPasswordValue(e.target.value)}
+            helperText="Laissez vide pour générer un mot de passe aléatoire"
+            sx={{ '& .MuiOutlinedInput-root': { borderRadius: 4 } }}
+          />
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setConfirmResetOpen(false)} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Annuler</Button>
+          <Button onClick={() => { setConfirmResetOpen(false); setResetPasswordValue(''); }} sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Annuler</Button>
           <Button color="primary" onClick={handleResetPassword} variant="contained" disableElevation sx={{ borderRadius: 100, textTransform: 'none', px: 3 }}>Confirmer</Button>
         </DialogActions>
       </Dialog>

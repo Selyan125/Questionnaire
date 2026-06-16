@@ -29,6 +29,10 @@ import {
   Chip,
   Collapse,
 } from '@mui/material'
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
+import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
+import dayjs from 'dayjs'
+import 'dayjs/locale/fr'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import AddIcon from '@mui/icons-material/Add'
@@ -47,7 +51,7 @@ import { getQuestionnaire, updateQuestionnaire, deleteQuestionnaire as deleteQue
 import { getStudentResults } from '../api/students.js'
 import { addQuestionToCategory as addQuestionToCategoryApi, deleteCategory as deleteCategoryApi, updateCategory as updateCategoryApi } from '../api/categories.js'
 import { listStudents } from '../api/students.js'
-import { listTeachers, listJuries, createJuryMaster } from '../api/teachers.js'
+import { listTeachers, listJuries, createJuryMaster, deleteJuryMaster } from '../api/teachers.js'
 import { createSession, getQuestionnaireSessions, updateSession, deleteSession, addJuryToSession, removeJuryFromSession, addStudentToSession, removeStudentFromSession, updateSessionStudentJury } from '../api/sessions.js'
 import { moveQuestion, reorderQuestions as reorderQuestionsApi } from '../api/questions.js'
 import { apiJson } from '../api/http.js'
@@ -72,8 +76,8 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const [questionnaire, setQuestionnaire] = useState(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [previewMode, setPreviewMode] = useState(null)
-  const [expandedGroups, setExpandedGroups] = useState({}) // State for expanding/collapsing jury groups
-  const [availableTeachers, setAvailableTeachers] = useState([]) // Keep this
+  const [expandedGroups, setExpandedGroups] = useState({}) 
+  const [availableTeachers, setAvailableTeachers] = useState([])
   const [availableStudents, setAvailableStudents] = useState([])
   const [availableJuries, setAvailableJuries] = useState([])
   const [sessionsDialogOpen, setSessionsDialogOpen] = useState(false)
@@ -413,9 +417,21 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   async function addJuryMasterUI(name) {
     try {
       await createJuryMaster(name)
+      setSnackbar({ open: true, message: `Jury "${name}" créé avec succès !`, severity: 'success' })
       await loadMembershipOptions()
     } catch (err) {
       console.error('Could not create master jury:', err)
+    }
+  }
+
+  async function deleteJuryMasterUI(juryId) {
+    try {
+      await deleteJuryMaster(juryId)
+      setSnackbar({ open: true, message: "Jury supprimé avec succès", severity: 'success' })
+      await loadMembershipOptions()
+      await loadSessionsFromAPI()
+    } catch (err) {
+      setSnackbar({ open: true, message: "Erreur lors de la suppression du jury", severity: 'error' })
     }
   }
 
@@ -765,7 +781,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   )
 
   return (
-    <>
+    <LocalizationProvider dateAdapter={AdapterDayjs} adapterLocale="fr">
       <Stack sx={{ height: '100vh', overflow: 'hidden', p: 0, pt: 0, mt: 0, m: 0 }}>
         <TopAppBar
           pages={pages}
@@ -775,8 +791,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           onRenamePage={canEdit ? renameCategory : undefined}
           title={questionnaire && questionnaire.title}
           onTitleChange={canEdit ? saveQuestionnaireTitle : undefined}
-          date={questionnaire?.date}
-          onDateChange={canEdit ? (newDate) => updateQuestionnaireSettings({ date: newDate }) : undefined}
           centerActions={(canEdit || studentScore !== null) ? (
               <Paper 
                 elevation={0}
@@ -857,13 +871,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           {/* Center - questions grid */}
           <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             {/* Overlay de blocage si aucun étudiant n'est sélectionné en mode évaluation */}
-            {(previewMode === 'teacher' || (!canEdit && viewerMode === 'teacher')) && !selectedStudentId && (
+            {(previewMode === 'teacher' || (!canEdit && viewerMode === 'teacher')) && !selectedStudentId && !snackbar.open && (
               <Box sx={{ 
                 position: 'absolute', 
                 inset: 0, 
                 bgcolor: 'rgba(252, 252, 253, 0.8)', 
                 backdropFilter: 'blur(4px)',
-                zIndex: 2000,
+                zIndex: 100,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -881,9 +895,9 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   }}
                 >
                   <SchoolIcon sx={{ fontSize: 48, color: 'primary.main', mb: 2, opacity: 0.5 }} />
-                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>Prêt pour l'évaluation ?</Typography>
+                  <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>On commence ?</Typography>
                   <Typography sx={{ color: 'text.secondary', fontSize: 14 }}>
-                    Veuillez sélectionner un étudiant dans la liste de gauche pour commencer à remplir le questionnaire.
+                    Selectionnez un étudiant dans la liste de gauche pour commencer l'évaluation. Vous pourrez ensuite naviguer entre les catégories et noter chaque question.
                   </Typography>
                 </Paper>
               </Box>
@@ -1326,6 +1340,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         onAddStudent={addStudentToSessionUI}
         onRemoveStudent={removeStudentFromSessionUI}
         onAddJuryMaster={addJuryMasterUI}
+        onDeleteJuryMaster={isAdmin ? deleteJuryMasterUI : undefined}
       />
       <Dialog
         fullScreen
@@ -1344,8 +1359,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               title={questionnaire?.title}
               onTitleChange={undefined}
               onAddCategory={undefined}
-              date={questionnaire?.date}
-              onDateChange={undefined}
               centerActions={previewMode === 'teacher' ? (
                   <Paper 
                     elevation={0}
@@ -1474,7 +1487,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           {snackbar.message}
         </Alert>
       </Snackbar>
-    </>
+    </LocalizationProvider>
   )
 
 }

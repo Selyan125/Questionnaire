@@ -10,43 +10,55 @@ router.post('/import', requireAdmin, async (req, res) => {
 
   for (const userData of users) {
     try {
-      const { email, nom, prenom } = userData;
+      let { email, nom, prenom } = userData;
+      if (email === 'N/A') email = '';
+      
+      let existing = null;
+      if (email && email.trim() !== "") {
+        if (targetRole === 'student') existing = await prisma.student.findUnique({ where: { email } });
+        else if (targetRole === 'teacher') existing = await prisma.teacher.findUnique({ where: { email } });
+      }
+
       const generatedPassword = generatePassword(); 
       const hashedPassword = await hashPassword(generatedPassword); 
 
       if (targetRole === 'student') {
-        const existingStudent = await prisma.student.findUnique({ where: { email } });
-        if (existingStudent) {
+        if (existing) {
           await prisma.student.update({
-            where: { id: existingStudent.id },
+            where: { id: existing.id },
             data: { nom, prenom, year: userData.year, group: userData.group },
           });
-          results.push({ email, status: 'updated', message: 'Étudiant mis à jour' });
+          results.push({ email: (existing.email && !existing.email.includes('_')) ? existing.email : '', status: 'updated', input: userData, message: 'Étudiant mis à jour' });
         } else {
           await prisma.student.create({
-            data: { email, nom, prenom, year: userData.year, group: userData.group }, // Ajout de year et group
+            data: { 
+              email: (email && email.trim() !== "") ? email : null, 
+              nom, prenom, year: userData.year, group: userData.group 
+            },
           });
-          results.push({ email, status: 'created', message: 'Étudiant créé' });
+          results.push({ email: (email && !email.includes('_')) ? email : '', status: 'created', input: userData, message: 'Étudiant créé' });
         }
       } else if (targetRole === 'teacher') {
-        const existingTeacher = await prisma.teacher.findUnique({ where: { email } });
-        if (existingTeacher) {
+        if (existing) {
           await prisma.teacher.update({
-            where: { id: existingTeacher.id },
-            data: { name: nom, lastName: prenom }, 
+            where: { id: existing.id },
+            data: { name: prenom, lastName: nom }, // name=Prenom, lastName=Nom pour TeachersView
           });
-          results.push({ email, status: 'updated', message: 'Enseignant mis à jour' });
+          results.push({ email: (existing.email && !existing.email.includes('_')) ? existing.email : '', status: 'updated', input: userData, message: 'Enseignant mis à jour' });
         } else {
           await prisma.teacher.create({
-            data: { email, password: hashedPassword, name: nom, lastName: prenom },
+            data: { 
+              email: (email && email.trim() !== "") ? email : null, 
+              password: hashedPassword, name: prenom, lastName: nom 
+            },
           });
-          results.push({ email, status: 'created', password: generatedPassword, message: 'Enseignant créé' });
+          results.push({ email: (email && !email.includes('_')) ? email : '', status: 'created', password: generatedPassword, input: userData, message: 'Enseignant créé' });
         }
       } else {
-        results.push({ email, status: 'error', reason: 'Rôle cible inconnu' });
+        results.push({ email: email || '', status: 'error', input: userData, reason: 'Rôle cible inconnu' });
       }
     } catch (e) {
-      results.push({ email: userData.email, status: 'error', reason: e.message });
+      results.push({ email: userData.email || '', status: 'error', input: userData, reason: e.message });
     }
   }
   res.status(200).json({ results });
@@ -72,7 +84,6 @@ router.post('/import-all', requireAdmin, async (req, res) => {
               data: {
                 name: teacherData.name,
                 lastName: teacherData.lastName,
-                admin: teacherData.admin,
                 jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
               },
             });
@@ -86,7 +97,6 @@ router.post('/import-all', requireAdmin, async (req, res) => {
                 name: teacherData.name,
                 lastName: teacherData.lastName,
                 password: hashedPassword,
-                admin: teacherData.admin,
                 jury: teacherData.jury ? { connect: { id: teacherData.jury.id } } : undefined,
               },
             });

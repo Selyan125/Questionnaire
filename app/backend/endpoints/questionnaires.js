@@ -49,13 +49,13 @@ router.get('/export-all', requireAdmin, async (req, res) => {
     });
 
     const teachers = await prisma.teacher.findMany({
-      select: { id: true, email: true, admin: true, jury: true }
+      select: { id: true, email: true, jury: true }
     });
 
     res.json({
       questionnaires: await mergeQuestionnaireSettings(questionnaires),
-      students,
-      teachers,
+      students: students.map(s => ({ ...s, email: (s.email && s.email.includes('_')) ? '' : s.email })),
+      teachers: teachers.map(t => ({ ...t, email: (t.email && t.email.includes('_')) ? '' : t.email })),
       exportDate: new Date().toISOString()
     });
   } catch (err) {
@@ -85,14 +85,14 @@ router.get('/results/all-csv', requireAdmin, async (req, res) => {
         `"${(s.student?.nom || '').replace(/"/g, '""')}"`,
         `"${(s.student?.prenom || '').replace(/"/g, '""')}"`,
         `"${(s.student?.year || '').replace(/"/g, '""')}"`,
-        `"${s.student?.email || ''}"`,
+        `"${(s.student?.email && !s.student.email.includes('_')) ? s.student.email : ''}"`,
         `"${jury.replace(/"/g, '""')}"`,
         `"${(s.questionnaire?.title || '').replace(/"/g, '""')}"`,
         `"${(s.session?.name || '').replace(/"/g, '""')}"`,
         `"${evaluator.replace(/"/g, '""')}"`,
         s.score || 0,
         s.questionnaire?.maxScore || 20,
-        s.submittedAt ? s.submittedAt.toISOString() : ''
+        s.submittedAt ? s.submittedAt.toLocaleDateString('fr-FR') : ''
       ].join(','));
     });
 
@@ -103,7 +103,7 @@ router.get('/results/all-csv', requireAdmin, async (req, res) => {
 router.get('/', requireTeacher, async (req, res) => {
   const teacherId = Number(req.user.id);
   const questionnaires = await prisma.questionnaire.findMany({ where: req.user.admin ? {} : { sessions: { some: { active: true, juries: { some: { teacherId } } } } }, orderBy: { id: 'desc' }, include: { categories: true, sessions: { where: req.user.admin ? {} : { active: true, juries: { some: { teacherId } } }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } } } } })
-  const formatted = questionnaires.map(q => ({ ...q, sessions: (q.sessions || []).map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sj.teacher.email })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) })) }))
+  const formatted = questionnaires.map(q => ({ ...q, sessions: (q.sessions || []).map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sj.teacher.email, teacherName: sj.teacher.name, teacherLastName: sj.teacher.lastName })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) })) }))
   res.json(await mergeQuestionnaireSettings(formatted))
 })
 
@@ -118,8 +118,14 @@ router.get('/:id', requireTeacher, async (req, res) => {
             orderBy: { priority: 'asc' }, 
             include: { elements: { orderBy: { priority: 'asc' } } } 
           } 
-        } 
-      } 
+        }
+      },
+      sessions: {
+        include: {
+          juries: { include: { jury: true, teacher: true } },
+          students: { include: { student: true, jury: true } }
+        }
+      }
     } 
   })
   if (!q) return res.status(404).json({ error: 'Not found' })
@@ -235,6 +241,12 @@ const handleDuplication = async (req, res) => {
               include: {
                 elements: true
               }
+          }
+        },
+        sessions: {
+          include: {
+            juries: true,
+            students: true
             }
           }
         }
@@ -272,6 +284,25 @@ const handleDuplication = async (req, res) => {
                     evaluatingValue: el.evaluatingValue
                   }))
                 }
+              }))
+            }
+          }))
+        },
+        sessions: {
+          create: original.sessions.map(s => ({
+            name: s.name,
+            date: s.date,
+            active: s.active,
+            juries: {
+              create: s.juries.map(j => ({
+                teacherId: j.teacherId,
+                juryId: j.juryId
+              }))
+            },
+            students: {
+              create: s.students.map(st => ({
+                studentId: st.studentId,
+                juryId: st.juryId
               }))
             }
           }))
@@ -318,6 +349,25 @@ router.post('/import', requireAdmin, async (req, res) => {
                     evaluatingValue: el.evaluatingValue || 0
                   }))
                 }
+              }))
+            }
+          }))
+        },
+        sessions: {
+          create: (qData.sessions || []).map(s => ({
+            name: s.name,
+            date: s.date ? new Date(s.date) : null,
+            active: !!s.active,
+            juries: {
+              create: (s.juries || []).map(j => ({
+                teacherId: j.teacherId,
+                juryId: j.juryId
+              }))
+            },
+            students: {
+              create: (s.students || []).map(st => ({
+                studentId: st.studentId,
+                juryId: st.juryId
               }))
             }
           }))
@@ -435,8 +485,8 @@ router.get('/:id/results', requireTeacher, async (req, res) => {
     res.json(submissions.map(s => ({
       id: s.id,
       studentId: s.studentId,
-      student: s.student ? { id: s.student.id, email: s.student.email, nom: s.student.nom, prenom: s.student.prenom, year: s.student.year, group: s.student.group } : null,
-      email: s.student?.email || null,
+      student: s.student ? { ...s.student, email: (s.student.email && s.student.email.includes('_')) ? '' : s.student.email } : null,
+      email: (s.student?.email && !s.student.email.includes('_')) ? s.student.email : null,
       answers: safeParseJSON(s.answers) || [],
       submittedAt: formatSubmissionDate(s.submittedAt),
       sessionName: s.session?.name || 'Hors session', // Récupérer le nom de la session directement

@@ -12,6 +12,10 @@ export function createJuryMaster(name) {
   return apiJson('/api/juries', { method: 'POST', json: { name } })
 }
 
+export function deleteJuryMaster(id) {
+  return apiJson(`/api/juries/${id}`, { method: 'DELETE' })
+}
+
 export function assignTeacherJury(teacherId, juryName) {
   return apiJson(`/api/teachers/${teacherId}/jury`, {
     method: 'POST',

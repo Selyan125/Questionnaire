@@ -6,12 +6,12 @@ const router = express.Router()
 async function getSD(id) {
   const s = await prisma.session.findUnique({ where: { id: Number(id) }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } } })
   if (!s) return null
-  return { ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sj.teacher.email })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) }
+  return { ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: (sj.teacher.email && sj.teacher.email.includes('_')) ? '' : sj.teacher.email, teacherName: sj.teacher.name, teacherLastName: sj.teacher.lastName })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: (ss.student.email && ss.student.email.includes('_')) ? '' : ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) }
 }
 
 async function getQSD(qid, filter = {}) {
   const ss = await prisma.session.findMany({ where: { questionnaireId: Number(qid), ...filter }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } }, orderBy: { id: 'asc' } })
-  return ss.map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sj.teacher.email })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) }))
+  return ss.map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: (sj.teacher.email && sj.teacher.email.includes('_')) ? '' : sj.teacher.email, teacherName: sj.teacher.name, teacherLastName: sj.teacher.lastName })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: (ss.student.email && ss.student.email.includes('_')) ? '' : ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) }))
 }
 
 router.post('/questionnaires/:questionnaireId/sessions', requireAdmin, async (req, res) => {
