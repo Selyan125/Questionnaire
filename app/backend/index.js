@@ -55,7 +55,7 @@ app.use('/api/questionnaires', questionnaireRouter)
 app.use('/api', apiRouter)
 app.use('/api', sessionsRouter)
 app.use('/api', submissionsRouter)
-app.use('/api/admin', adminRouter) // Correction du chemin de montage pour le routeur admin
+app.use('/api/admin', adminRouter)
 const PORT = 4000
 
 ;(async () => {

@@ -200,11 +200,9 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   const loadForStudent = useCallback(async (studentId) => {
     if (!studentId || !effectiveQuestionnaireId) return
     try {
-      // On cherche les soumissions existantes pour cet étudiant et ce questionnaire
       const res = await getStudentResults(studentId)
       const submissions = Array.isArray(res) ? res : (res?.results || [])
       
-      // On filtre pour trouver la soumission correspondant à la session actuelle ou la plus récente
       const submission = submissions.find(s => 
         Number(s.questionnaireId) === Number(effectiveQuestionnaireId) && 
         (selectedSessionId ? Number(s.sessionId) === Number(selectedSessionId) : true)
@@ -239,13 +237,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           studentId: selectedStudentId,
           questionnaireId: Number(effectiveQuestionnaireId),
           sessionId: Number(selectedSessionId),
-          evaluatorId: authUser.id, // On enregistre qui a noté
+          evaluatorId: authUser.id,
           answers: collectedAnswers,
           score: studentScore
         }
       })
       setSnackbar({ open: true, message: "Évaluation enregistrée avec succès !", severity: 'success' })
-      setSelectedStudentId(null) // On déselectionne pour passer au suivant
+      setSelectedStudentId(null)
       setCollectedAnswers({})
       await loadEvaluatedStatus()
     } catch (e) {
@@ -638,17 +636,14 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       let catScore = 0
       let catCeilings = []
       
-      // On trie les questions par priorité car l'ordre influe sur le calcul (ex: coefficients)
       const sortedQuestions = [...(cat.questions || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
       
       for (const q of sortedQuestions) {
         const answer = collectedAnswers[q.id]
         if (answer === undefined || answer === null) continue
         
-        // Gestion des réponses uniques ou multiples
         const selectedIds = Array.isArray(answer) ? answer.map(String) : [String(answer)]
         
-        // On trie aussi les éléments par priorité au sein de la question
         const sortedElements = [...(q.elements || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
         
         for (const el of sortedElements) {
@@ -656,10 +651,10 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
             const type = Number(el.evaluatingType || 0)
             const val = Number(el.evaluatingValue || 0)
             
-            if (type === 1) catScore += val // Ajoute
-            else if (type === 2) catScore -= val // Enlève
-            else if (type === 3) catScore *= val // Coefficient
-            else if (type === 5) catCeilings.push(val) // Plafond
+            if (type === 1) catScore += val
+            else if (type === 2) catScore -= val
+            else if (type === 3) catScore *= val
+            else if (type === 5) catCeilings.push(val)
           }
         }
       }
@@ -668,7 +663,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         catCeilings.push(Number(cat.currentNote))
       }
 
-      // Application du plafond le plus restrictif si activé
       if (catCeilings.length > 0) {
         catScore = Math.min(catScore, Math.min(...catCeilings))
       }
@@ -870,7 +864,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
           {/* Center - questions grid */}
           <Box sx={{ flex: 1, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            {/* Overlay de blocage si aucun étudiant n'est sélectionné en mode évaluation */}
             {(previewMode === 'teacher' || (!canEdit && viewerMode === 'teacher')) && !selectedStudentId && !snackbar.open && (
               <Box sx={{ 
                 position: 'absolute', 
@@ -932,7 +925,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   bgcolor: 'background.paper',
                   border: '1px solid rgba(0,0,0,0.08)',
                   boxShadow: 'none',
-                  zIndex: 10, // Très bas pour passer sous les paramètres
+                  zIndex: 10,
                   p: 2.5,
                   '&:hover': { bgcolor: '#fff', transform: 'translateY(-50%) scale(1.1)' },
                   '&.Mui-disabled': { opacity: 0.1 }
@@ -970,7 +963,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   bgcolor: 'background.paper',
                   border: '1px solid rgba(0,0,0,0.08)',
                   boxShadow: 'none',
-                  zIndex: 10, // Très bas pour passer sous les paramètres
+                  zIndex: 10,
                   p: 2.5,
                   '&:hover': { bgcolor: '#fff', transform: 'translateY(-50%) scale(1.1)' },
                   '&.Mui-disabled': { opacity: 0.1 }
@@ -986,7 +979,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               </Box>
             )}
 
-            {/* 2 lignes x 3 colonnes (6 slots) */}
             <Box
               sx={{
                 p: 0.75,

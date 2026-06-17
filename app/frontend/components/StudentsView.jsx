@@ -195,7 +195,11 @@ export default function StudentsView() {
                         <Checkbox size="small" checked={selectedIds.includes(s.id)} onChange={() => toggleSelect(s.id)} />
                         <Box>
                           <Typography sx={{ fontSize: 14, fontWeight: 600, color: '#1a1a1b' }}>{s.nom} {s.prenom}</Typography>
-                          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>{s.email} {s.group ? `• Groupe ${s.group}` : ''}</Typography>
+                          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+                            {s.email}
+                            {s.email && s.group ? ' • ' : ''}
+                            {s.group ? `Groupe ${s.group}` : ''}
+                          </Typography>
                         </Box>
                       </Box>
                       <Box sx={{ display: 'flex', gap: 0.5 }}>

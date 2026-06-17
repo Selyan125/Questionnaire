@@ -1,5 +1,5 @@
 import express from 'express'
-import { prisma, requireTeacher, requireAdmin, mergeQuestionnaireSettings, getQuestionnaireMembers, formatSubmissionDate, safeParseJSON } from '../utils.js'
+import { prisma, requireTeacher, requireAdmin, mergeQuestionnaireSettings, getQuestionnaireMembers, formatSubmissionDate, safeParseJSON, sanitizeEmail } from '../utils.js'
 
 const router = express.Router()
 export const apiRouter = express.Router()
@@ -110,7 +110,6 @@ router.get('/students/export-csv', requireAdmin, async (req, res) => {
     const lines = [cols.join(',')];
 
     students.forEach(s => {
-      // On applique le même filtre que pour les enseignants pour masquer les identifiants techniques
       const cleanEmail = (s.email && s.email.includes('_')) ? '' : (s.email || '');
       lines.push([
         `"${(s.nom || '').replace(/"/g, '""')}"`,
@@ -130,7 +129,7 @@ router.get('/students/export-csv', requireAdmin, async (req, res) => {
 router.get('/', requireTeacher, async (req, res) => {
   const teacherId = Number(req.user.id);
   const questionnaires = await prisma.questionnaire.findMany({ where: req.user.admin ? {} : { sessions: { some: { active: true, juries: { some: { teacherId } } } } }, orderBy: { id: 'desc' }, include: { categories: true, sessions: { where: req.user.admin ? {} : { active: true, juries: { some: { teacherId } } }, include: { juries: { include: { jury: true, teacher: true } }, students: { include: { student: true, jury: true } } } } } })
-  const formatted = questionnaires.map(q => ({ ...q, sessions: (q.sessions || []).map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sj.teacher.email, teacherName: sj.teacher.name, teacherLastName: sj.teacher.lastName })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: ss.student.email, studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) })) }))
+  const formatted = questionnaires.map(q => ({ ...q, sessions: (q.sessions || []).map(s => ({ ...s, juries: s.juries.map(sj => ({ id: sj.id, juryId: sj.juryId, juryName: sj.jury.name, teacherId: sj.teacherId, teacherEmail: sanitizeEmail(sj.teacher.email), teacherName: sj.teacher.name, teacherLastName: sj.teacher.lastName })), students: s.students.map(ss => ({ id: ss.id, studentId: ss.studentId, studentEmail: sanitizeEmail(ss.student.email), studentNom: ss.student.nom, studentPrenom: ss.student.prenom, juryId: ss.juryId, juryName: ss.jury.name })) })) }))
   res.json(await mergeQuestionnaireSettings(formatted))
 })
 
@@ -199,26 +198,24 @@ router.get('/:id/export-questions-csv', requireAdmin, async (req, res) => {
 
     q.categories.forEach((cat, catIdx) => {
       cat.questions.forEach((question) => {
-        // Détermination du type de la question basé sur ses éléments pour la ligne de titre
         const firstEl = question.elements[0]
         const qType = firstEl ? (typeMap[firstEl.type] || firstEl.type) : 'unique'
 
-        // Ligne pour le titre de la question (Niveau 0)
         lines.push([
-          catIdx, // Position de la catégorie commence à 0
+          catIdx,
           `"${cat.title.replace(/"/g, '""')}"`,
-          0,      // Niveau 0 pour le titre de la question
+          0,
           qType,
-          `"${question.title.replace(/"/g, '""')}"`, // La valeur est le titre de la question
-          '',     // Pas de type de réponse pour le titre
-          ''      // Pas de valeur de réponse pour le titre
+          `"${question.title.replace(/"/g, '""')}"`,
+          '',
+          ''
         ].join(','))
 
         question.elements.forEach((el, elIdx) => {
           lines.push([
             catIdx,
             `"${cat.title.replace(/"/g, '""')}"`,
-            elIdx + 1, // Les réponses commencent au niveau 1
+            elIdx + 1,
             typeMap[el.type] || el.type,
             `"${el.title.replace(/"/g, '""')}"`,
             evalMap[el.evaluatingType] || 'non noté',
@@ -413,7 +410,6 @@ router.post('/import-questions-csv', requireAdmin, async (req, res) => {
     const { csv, questionnaireId, config } = req.body
     let targetId = questionnaireId
 
-    // Si aucun ID n'est fourni, on crée un nouveau questionnaire
     if (!targetId) {
       const q = await prisma.questionnaire.create({
         data: {
@@ -434,7 +430,6 @@ router.post('/import-questions-csv', requireAdmin, async (req, res) => {
     const categoriesMap = new Map()
 
     for (const line of lines) {
-      // Parsing CSV gérant les guillemets
       const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',')
       const [catIdx, catTitle, level, type, value, respType, respVal] = parts.map(p => p.trim().replace(/^"|"$/g, ''))
       
@@ -460,13 +455,12 @@ router.post('/import-questions-csv', requireAdmin, async (req, res) => {
       }
     }
 
-    // Création en base de données via transaction
     await prisma.$transaction(async (tx) => {
       const sortedIndices = Array.from(categoriesMap.keys()).sort((a, b) => a - b)
       for (const idx of sortedIndices) {
         const catData = categoriesMap.get(idx)
         const category = await tx.questionCategory.create({
-        data: { title: catData.title, questionnaireId: Number(targetId), currentNote: 0 } // Ajout de currentNote
+        data: { title: catData.title, questionnaireId: Number(targetId), currentNote: 0 }
         })
 
         for (const qData of catData.questions) {
@@ -499,11 +493,11 @@ router.get('/:id/results', requireTeacher, async (req, res) => {
       where: { questionnaireId: qid },
       include: {
         student: {
-          select: { id: true, email: true, nom: true, prenom: true, year: true, group: true } // Inclure year et group
+          select: { id: true, email: true, nom: true, prenom: true, year: true, group: true }
         },
-        teacher: { select: { name: true, lastName: true, email: true } }, // L'évaluateur
+        teacher: { select: { name: true, lastName: true, email: true } },
         session: {
-          select: { id: true, name: true, date: true, students: { include: { jury: { include: { teachers: { select: { name: true, lastName: true } } } } } } } // Pour retrouver le jury de l'étudiant
+          select: { id: true, name: true, date: true, students: { include: { jury: { include: { teachers: { select: { name: true, lastName: true } } } } } } }
         }
       },
       orderBy: { submittedAt: 'desc' }
@@ -516,7 +510,7 @@ router.get('/:id/results', requireTeacher, async (req, res) => {
       email: (s.student?.email && !s.student.email.includes('_')) ? s.student.email : null,
       answers: safeParseJSON(s.answers) || [],
       submittedAt: formatSubmissionDate(s.submittedAt),
-      sessionName: s.session?.name || 'Hors session', // Récupérer le nom de la session directement
+      sessionName: s.session?.name || 'Hors session',
       sessionId: s.session?.id || null,
       evaluator: s.teacher ? `${s.teacher.name} ${s.teacher.lastName}` : 'N/A',
       juryName: s.session?.students?.find(ss => ss.studentId === s.studentId)?.jury?.name || 'Inconnu',
@@ -572,7 +566,6 @@ apiRouter.put('/categories/:id/questions/reorder', requireAdmin, async (req, res
     const { questionIds } = req.body;
     if (!Array.isArray(questionIds)) return res.status(400).json({ error: 'questionIds doit être un tableau' });
     
-    // On utilise une transaction pour garantir la cohérence
     await prisma.$transaction(
       questionIds.map((id, idx) => 
         prisma.question.update({ 

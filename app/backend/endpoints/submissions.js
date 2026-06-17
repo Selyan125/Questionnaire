@@ -1,5 +1,5 @@
 import express from 'express'
-import { prisma, requireTeacher, parseSubmissionDate, formatSubmissionDate, safeParseJSON } from '../utils.js'
+import { prisma, requireTeacher, parseSubmissionDate, formatSubmissionDate, safeParseJSON, sanitizeEmail } from '../utils.js'
 
 const router = express.Router()
 
@@ -14,7 +14,6 @@ router.post('/submissions', requireTeacher, async (req, res) => {
     const sessId = sessionId ? Number(sessionId) : null
     const d = parseSubmissionDate(submittedAt) || new Date()
 
-    // On cherche si une évaluation existe déjà pour ce duo étudiant/questionnaire
     const existing = await prisma.submission.findFirst({
       where: { questionnaireId: qid, studentId: sid }
     })
@@ -43,7 +42,7 @@ router.post('/submissions', requireTeacher, async (req, res) => {
 router.get('/submissions/:id', requireTeacher, async (req, res) => {
   const s = await prisma.submission.findUnique({ where: { id: Number(req.params.id) }, include: { student: true, questionnaire: true } })
   if (!s) return res.status(404).json({ error: 'Not found' })
-  res.json({ id: s.id, questionnaireId: s.questionnaireId, questionnaire: s.questionnaire ? { id: s.questionnaire.id, title: s.questionnaire.title } : null, studentId: s.studentId, student: s.student ? { id: s.student.id, email: s.student.email, nom: s.student.nom, prenom: s.student.prenom } : null, answers: safeParseJSON(s.answers) || [], submittedAt: formatSubmissionDate(s.submittedAt) })
+  res.json({ id: s.id, questionnaireId: s.questionnaireId, questionnaire: s.questionnaire ? { id: s.questionnaire.id, title: s.questionnaire.title } : null, studentId: s.studentId, student: s.student ? { id: s.student.id, email: sanitizeEmail(s.student.email), nom: s.student.nom, prenom: s.student.prenom } : null, answers: safeParseJSON(s.answers) || [], submittedAt: formatSubmissionDate(s.submittedAt) })
 })
 
 router.get('/results/:id', requireTeacher, async (req, res) => { res.redirect(301, `/api/submissions/${req.params.id}`) })

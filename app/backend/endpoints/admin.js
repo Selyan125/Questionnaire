@@ -44,7 +44,7 @@ router.post('/import', requireAdmin, async (req, res) => {
         if (existing) {
           await prisma.teacher.update({
             where: { id: existing.id },
-            data: { name: prenom, lastName: nom }, // name=Prenom, lastName=Nom pour TeachersView
+            data: { name: prenom, lastName: nom },
           });
           results.push({ email: (existing.email && !existing.email.includes('_')) ? existing.email : '', status: 'updated', input: userData, message: 'Enseignant mis à jour' });
         } else {
@@ -133,7 +133,7 @@ router.post('/import-all', requireAdmin, async (req, res) => {
                 email: studentEmail,
                 nom: studentData.nom,
                 prenom: studentData.prenom,
-                year: studentData.year, // Ajout du champ 'year'
+                year: studentData.year,
                 group: studentData.group,
               },
             });

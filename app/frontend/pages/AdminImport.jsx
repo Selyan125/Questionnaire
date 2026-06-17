@@ -15,12 +15,10 @@ export default function AdminImport() {
   const [isDraggingOver, setIsDraggingOver] = useState(false); 
   const [jsonFile, setJsonFile] = useState(null)
   
-  // States pour l'import de questions
   const [questionnaires, setQuestionnaires] = useState([])
   const [selectedQId, setSelectedQId] = useState('new')
   const [qConfig, setQConfig] = useState({ title: 'Import Questions', maxScore: 20, gradingMode: 'points' })
 
-  // States pour l'ajout manuel d'un étudiant
   const [showManualAdd, setShowManualAdd] = useState(false)
   const [newStudent, setNewStudent] = useState({ nom: '', prenom: '', year: '', group: '', email: '' })
   const [isAdding, setIsAdding] = useState(false)
@@ -142,8 +140,6 @@ export default function AdminImport() {
         } else {
             setCsv(content);
         }
-        // Le changement de state étant asynchrone, l'import utilisera 
-        // les valeurs passées ici ou via un effet. 
       };
       reader.readAsText(file)
     }
@@ -391,7 +387,6 @@ export default function AdminImport() {
                   <TableRow key={i}>
                     <TableCell>{`${r.input?.nom || ''} ${r.input?.prenom || ''}`}</TableCell>
                     <TableCell>
-                      {/* Masquer les emails techniques (contenant _) ou N/A */}
                       {r.email && !r.email.includes('_') && r.email !== 'N/A' 
                         ? r.email 
                         : (r.input?.email !== 'N/A' ? r.input?.email : '')}

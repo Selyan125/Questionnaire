@@ -43,6 +43,10 @@ export function normalizeEmail(email) {
   return typeof email === 'string' ? email.trim().toLowerCase() : ''
 }
 
+export function sanitizeEmail(email) {
+  return (email && email.includes('_')) ? '' : (email || '')
+}
+
 export function safeParseJSON(value) {
   if (typeof value !== 'string') return value
   try { return JSON.parse(value) } catch { return null }
@@ -93,5 +97,5 @@ export async function getQuestionnaireMembers(questionnaireId) {
   const qid = Number(questionnaireId)
   const juryRows = await prisma.questionnaireJuryMember.findMany({ where: { questionnaireId: qid }, include: { teacher: true }, orderBy: { teacher: { email: 'asc' } } })
   const studentRows = await prisma.questionnaireStudentMember.findMany({ where: { questionnaireId: qid }, include: { student: true }, orderBy: [{ student: { nom: 'asc' } }, { student: { prenom: 'asc' } }, { student: { email: 'asc' } }] })
-  return { teachers: juryRows.map(row => ({ id: row.teacher.id, email: row.teacher.email, jury: row.teacher.jury, admin: row.teacher.admin })), students: studentRows.map(row => ({ id: row.student.id, email: row.student.email, nom: row.student.nom, prenom: row.student.prenom, assignedJury: row.student.assignedJury })) }
+  return { teachers: juryRows.map(row => ({ id: row.teacher.id, email: sanitizeEmail(row.teacher.email), jury: row.teacher.jury, admin: row.teacher.admin })), students: studentRows.map(row => ({ id: row.student.id, email: sanitizeEmail(row.student.email), nom: row.student.nom, prenom: row.student.prenom, assignedJury: row.student.assignedJury })) }
 }
