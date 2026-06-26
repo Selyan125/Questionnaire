@@ -423,7 +423,7 @@ router.post('/import-questions-csv', requireAdmin, async (req, res) => {
       targetId = q.id
     }
 
-    const lines = csv.split(/\r?\n/).filter(l => l.trim()).slice(1) // On saute l'en-tête
+    const lines = csv.split(/\r?\n/).filter(l => l.trim()).slice(1)
     const typeMap = { 'unique': 'radio', 'multiple': 'checkbox', 'texte': 'text' }
     const evalMap = { 'ajoute': 1, 'enleve': 2, 'coefficient multiplicateur': 3, 'plafond categorie': 5 }
 

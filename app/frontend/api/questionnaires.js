@@ -44,10 +44,10 @@ export function importQuestionnaire(payload) {
   })
 }
 
-export function addCategory(questionnaireId, { title }) {
+export function addCategory(questionnaireId, data) {
   return apiJson(`/api/questionnaires/${questionnaireId}/categories`, {
     method: 'POST',
-    json: { title },
+    json: data,
   })
 }
 

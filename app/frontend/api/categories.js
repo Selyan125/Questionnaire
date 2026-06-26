@@ -11,9 +11,9 @@ export function deleteCategory(categoryId) {
   return apiJson(`/api/categories/${categoryId}`, { method: 'DELETE' })
 }
 
-export function updateCategory(categoryId, { title }) {
+export function updateCategory(categoryId, data) {
   return apiJson(`/api/categories/${categoryId}`, {
     method: 'PUT',
-    json: { title },
+    json: data,
   })
 }

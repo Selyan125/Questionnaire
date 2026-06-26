@@ -24,6 +24,7 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import CommentIcon from '@mui/icons-material/Comment';
 import { apiJson } from '../api/http.js'
 import { updateQuestionTitle, deleteQuestion as deleteQuestionApi, addElement as addQuestionElement, updateElement, deleteElement as deleteElementApi, duplicateQuestion } from '../api/questions.js'
 
@@ -55,7 +56,7 @@ function normalizeExternalAnswer(answer, elements) {
     return answer
 }
 
-function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerChange, externalAnswer }) {
+function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerChange, externalAnswer, comment = '', onCommentChange }) {
     const [editing, setEditing] = useState(false);
     const [question, setQuestion] = useState(data || {});
     const [elements, setElements] = useState((data && data.elements) || []);
@@ -63,6 +64,7 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
     const [customElement, setCustomElement] = useState(null);
     const [customAnchorEl, setCustomAnchorEl] = useState(null);
     const [dragOverIndex, setDragOverIndex] = useState(null);
+    const [showComment, setShowComment] = useState(!!comment);
     const draggingIndexRef = useRef(null);
 
     useEffect(() => {
@@ -202,7 +204,7 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         const evaluatingType = Number(nextElement.evaluatingType || 0);
         
         let numericValue = parseFloat(nextElement.evaluatingValue);
-        if (isNaN(numericValue) || (evaluatingType === 0 || evaluatingType === 5)) {
+        if (isNaN(numericValue) || (evaluatingType === 0)) {
             numericValue = 0;
         } else {
             numericValue = Math.max(0, numericValue);
@@ -217,7 +219,7 @@ function QuestionComponent({ data, index, onRefresh, readOnly = false, onAnswerC
         };
 
         const updatedState = { ...nextElement, evaluatingType };
-        if (evaluatingType === 0 || evaluatingType === 5) {
+        if (evaluatingType === 0) {
             updatedState.evaluatingValue = 0;
         }
         setCustomElement(updatedState);
@@ -322,7 +324,7 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
     }
 
     const noteType = Number(customElement?.evaluatingType || 0);
-    const noteValueDisabled = [0, 5].includes(noteType);
+    const noteValueDisabled = noteType === 0;
 
     return (
         <Card
@@ -380,6 +382,16 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                 }}>{editing ? <VisibilityIcon fontSize="small" /> : <EditIcon fontSize="small" />}</IconButton>
                             </>
                         )}
+                        {readOnly && (
+                            <IconButton 
+                                size="small" 
+                                onClick={() => setShowComment(!showComment)}
+                                title="Ajouter/Voir le commentaire"
+                                color={showComment || comment ? "primary" : "default"}
+                            >
+                                <CommentIcon fontSize="small" />
+                            </IconButton>
+                        )}
                     </Box>
                 </Box>
 
@@ -413,6 +425,31 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                 </Box>
                             )}
                         </Stack>
+                        {readOnly && showComment && (
+                            <Box sx={{ width: '100%', mt: 1.5, pt: 1.5, borderTop: '1px solid rgba(0,0,0,0.06)' }}>
+                                <TextField
+                                    label="Commentaire / Observations"
+                                    multiline
+                                    rows={2}
+                                    variant="outlined"
+                                    fullWidth
+                                    size="small"
+                                    value={comment || ''}
+                                    onChange={(e) => onCommentChange && onCommentChange(e.target.value)}
+                                    placeholder="Ajouter des précisions..."
+                                    slotProps={{
+                                        inputLabel: { style: { fontSize: 12, fontWeight: 500 } }
+                                    }}
+                                    sx={{ 
+                                        '& .MuiOutlinedInput-root': { 
+                                            borderRadius: '12px',
+                                            fontSize: 13,
+                                            bgcolor: 'rgba(0,0,0,0.01)'
+                                        } 
+                                    }}
+                                />
+                            </Box>
+                        )}
                     </>
                 )}
 
@@ -542,6 +579,11 @@ if (patch.type === 'radio' || patch.type === 'checkbox') {
                                         contentEditable={!readOnly}
                                         suppressContentEditableWarning
                                         role={readOnly ? undefined : 'textbox'}
+                                        onFocus={(event) => {
+                                            if (!readOnly && event.target.innerText.trim() === 'Nouvel élément') {
+                                                event.target.innerText = '';
+                                            }
+                                        }}
                                         onBlur={(event) => {
                                             const newTitle = event.target.innerText;
                                             setElements(els => els.map(it => (it && it.id) === (el && el.id) ? { ...it, title: newTitle } : it));

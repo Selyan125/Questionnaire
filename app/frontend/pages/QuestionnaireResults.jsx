@@ -103,7 +103,7 @@ export default function QuestionnaireResults(){
 
   function downloadSingleDetailedCsv(r) {
     if (!r || !questionnaire) return
-    const cols = ['Nom', 'Prénom', 'Année', 'Catégorie', 'Question', 'Réponse', 'Points', 'Type d\'évaluation']
+    const cols = ['Nom', 'Prénom', 'Année', 'Catégorie', 'Question', 'Réponse', 'Commentaire', 'Points', 'Type d\'évaluation']
     const lines = [cols.join(',')]
     
     const nom = r.student?.nom || ''
@@ -136,6 +136,8 @@ export default function QuestionnaireResults(){
             })
             .join('; ')
 
+        const comment = r.answers[`comment_q${q.id}`] || ''
+
         lines.push([
           `"${nom.replace(/"/g, '""')}"`,
           `"${prenom.replace(/"/g, '""')}"`,
@@ -143,6 +145,7 @@ export default function QuestionnaireResults(){
           `"${cat.title.replace(/"/g, '""')}"`,
           `"${q.title.replace(/"/g, '""')}"`,
           `"${responseText.replace(/"/g, '""')}"`,
+          `"${comment.replace(/"/g, '""')}"`,
           `"${pointsValue}"`,
           `"${typeLabel.replace(/"/g, '""')}"`
         ].join(','))
@@ -231,10 +234,71 @@ export default function QuestionnaireResults(){
         </DialogTitle>
         <DialogContent dividers sx={{ border: 'none' }}>
           <Stack spacing={4} sx={{ py: 1 }}>
-            {questionnaire?.categories?.map(cat => (
+            {questionnaire?.categories?.map(cat => {
+              // Calcul du score de la catégorie
+              let maxCategoryNote = Number(cat.currentNote || 0);
+              for (const q of cat.questions || []) {
+                for (const el of q.elements || []) {
+                  if (Number(el.evaluatingType || 0) === 5) {
+                    maxCategoryNote = Math.max(maxCategoryNote, Number(el.evaluatingValue || 0));
+                  }
+                }
+              }
+              
+              let catPoints = maxCategoryNote;
+              let catMultipliers = []
+              let catCeilings = []
+              
+              if (selectedSubmission?.answers) {
+                const sortedQs = [...(cat.questions || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
+                for (const q of sortedQs) {
+                  const ans = selectedSubmission.answers[q.id]
+                  if (ans === undefined || ans === null) continue
+                  
+                  const elements = q.elements || []
+                  const hasTextElements = elements.some(e => e.type === 'text')
+                  const isTextAnswer = hasTextElements && typeof ans === 'string' && ans.trim().length > 0 && !elements.some(other => other.type !== 'text' && String(other.id) === String(ans))
+                  
+                  let selectedIds = []
+                  if (isTextAnswer) {
+                    selectedIds = elements.filter(e => e.type === 'text').map(e => String(e.id))
+                  } else {
+                    selectedIds = Array.isArray(ans) ? ans.map(String) : [String(ans)]
+                  }
+                  
+                  for (const el of elements) {
+                    if (selectedIds.includes(String(el.id))) {
+                      const type = Number(el.evaluatingType || 0)
+                      const val = Number(el.evaluatingValue || 0)
+                      if (type === 1) catPoints += val
+                      else if (type === 2) catPoints -= val
+                      else if (type === 3) catMultipliers.push(val)
+                      else if (type === 5) catCeilings.push(val)
+                    }
+                  }
+                }
+              }
+              
+              let computedCatScore = catPoints
+              for (const coef of catMultipliers) {
+                computedCatScore *= coef
+              }
+              if (cat.currentNote && Number(cat.currentNote) > 0) {
+                catCeilings.push(Number(cat.currentNote))
+              }
+              if (catCeilings.length > 0) {
+                computedCatScore = Math.min(computedCatScore, Math.min(...catCeilings))
+              }
+              
+              const catCoef = cat.coefficient !== undefined ? Number(cat.coefficient) : 1;
+              computedCatScore = computedCatScore * catCoef;
+
+              return (
               <Box key={cat.id}>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <Typography variant="overline" sx={{ fontWeight: 900, color: 'primary.main', letterSpacing: 1.5 }}>{cat.title}</Typography>
+                <Typography variant="overline" sx={{ fontWeight: 900, color: 'primary.main', letterSpacing: 1.5 }}>
+                  {cat.title} <span style={{ textTransform: 'none', color: '#666', fontWeight: 600, marginLeft: 8 }}>— Note : {computedCatScore}</span>
+                </Typography>
                 {cat.currentNote > 0 && (
                   <Typography variant="caption" sx={{ fontWeight: 700, color: 'error.main', bgcolor: 'rgba(211, 47, 47, 0.05)', px: 1, py: 0.2, borderRadius: 1 }}>Plafond : {cat.currentNote} pts</Typography>
                 )}
@@ -275,12 +339,20 @@ export default function QuestionnaireResults(){
                           <Typography sx={{ fontSize: 14, color: 'text.disabled', fontStyle: 'italic' }}>Aucune réponse</Typography>
                         )}
                       </Stack>
+                      {selectedSubmission?.answers?.[`comment_q${q.id}`] && (
+                        <Box sx={{ mt: 1.5, p: 1.5, bgcolor: 'rgba(25, 118, 210, 0.04)', borderRadius: 2, borderLeft: '3px solid #1976d2' }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: 'primary.main', display: 'block', mb: 0.5 }}>Commentaire :</Typography>
+                          <Typography variant="body2" sx={{ color: 'text.secondary', whiteSpace: 'pre-wrap' }}>
+                            {selectedSubmission.answers[`comment_q${q.id}`]}
+                          </Typography>
+                        </Box>
+                      )}
                       </Box>
                     )
                   })}
                 </Stack>
               </Box>
-            ))}
+            )})}
           </Stack>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>

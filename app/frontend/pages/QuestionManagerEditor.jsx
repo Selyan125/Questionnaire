@@ -28,6 +28,7 @@ import {
   Checkbox,
   Chip,
   Collapse,
+  InputBase,
 } from '@mui/material'
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider'
 import { AdapterDayjs } from '@mui/x-date-pickers/AdapterDayjs'
@@ -43,6 +44,7 @@ import SchoolIcon from '@mui/icons-material/School'
 import CoPresentIcon from '@mui/icons-material/CoPresent'
 import SaveIcon from '@mui/icons-material/Save'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
+import UndoIcon from '@mui/icons-material/Undo'
 import { useNavigate, useParams } from 'react-router-dom'
 import TopAppBar from '../components/TopAppBar.jsx'
 import QuestionComponent from '../components/QuestionComponent.jsx'
@@ -88,6 +90,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
 
   const [evaluatedStudentIds, setEvaluatedStudentIds] = useState(new Set())
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' })
+  const [overrideScore, setOverrideScore] = useState('')
 
   const [selectedCategoryId, setSelectedCategoryId] = useState(null)
   const pages = questionnaire?.categories ? questionnaire.categories.map(c => ({ name: c.title, id: c.id, maxPoints: c.currentNote })) : [{ name: 'Questions', id: null }]
@@ -211,8 +214,10 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       if (submission && submission.answers) {
         const answers = typeof submission.answers === 'string' ? JSON.parse(submission.answers) : submission.answers
         setCollectedAnswers(answers)
+        setOverrideScore(submission.score !== undefined && submission.score !== null ? String(submission.score) : '')
       } else {
         setCollectedAnswers({})
+        setOverrideScore('')
       }
     } catch (e) {
       console.error('Failed to load student results', e)
@@ -231,6 +236,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     }
     try {
       setLoading(true)
+      const finalScoreNum = overrideScore !== '' ? parseFloat(overrideScore) : studentScore;
       await apiJson('/api/submissions', {
         method: 'POST',
         json: {
@@ -239,12 +245,13 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
           sessionId: Number(selectedSessionId),
           evaluatorId: authUser.id,
           answers: collectedAnswers,
-          score: studentScore
+          score: Number.isNaN(finalScoreNum) ? 0 : finalScoreNum
         }
       })
       setSnackbar({ open: true, message: "Évaluation enregistrée avec succès !", severity: 'success' })
       setSelectedStudentId(null)
       setCollectedAnswers({})
+      setOverrideScore('')
       await loadEvaluatedStatus()
     } catch (e) {
       setSnackbar({ open: true, message: "Erreur lors de la sauvegarde : " + e.message, severity: 'error' })
@@ -579,7 +586,8 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     const title = prompt('Titre de la nouvelle catégorie')
     if (!title) return
     try {
-      await addCategoryApi(effectiveQuestionnaireId, { title })
+      const maxScoreValue = Number(questionnaire?.maxScore || 20)
+      await addCategoryApi(effectiveQuestionnaireId, { title, currentNote: maxScoreValue })
       await load()
     } catch (e) {
       setError(e.message)
@@ -627,13 +635,25 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
   }, [flat, questionsLimit])
 
   // Calculate score for teacher view
-  const studentScore = useMemo(() => {
+  const scoreDetails = useMemo(() => {
     if (!questionnaire || !Array.isArray(questionnaire.categories)) {
-      return null
+      return { total: null, categories: {} }
     }
     let total = 0
+    let categoriesScores = {}
+    
     for (const cat of questionnaire.categories) {
-      let catScore = 0
+      let maxCategoryNote = Number(cat.currentNote || 0);
+      for (const q of cat.questions || []) {
+        for (const el of q.elements || []) {
+          if (Number(el.evaluatingType || 0) === 5) {
+            maxCategoryNote = Math.max(maxCategoryNote, Number(el.evaluatingValue || 0));
+          }
+        }
+      }
+      
+      let points = maxCategoryNote;
+      let multipliers = []
       let catCeilings = []
       
       const sortedQuestions = [...(cat.questions || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
@@ -642,21 +662,39 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         const answer = collectedAnswers[q.id]
         if (answer === undefined || answer === null) continue
         
-        const selectedIds = Array.isArray(answer) ? answer.map(String) : [String(answer)]
+        const elements = q.elements || []
+        const hasTextElements = elements.some(e => e.type === 'text')
         
-        const sortedElements = [...(q.elements || [])].sort((a, b) => (a.priority || 0) - (b.priority || 0))
+        const isTextAnswer = hasTextElements && 
+          typeof answer === 'string' && 
+          answer.trim().length > 0 && 
+          !elements.some(other => other.type !== 'text' && String(other.id) === String(answer));
+        
+        let selectedIds = []
+        if (isTextAnswer) {
+          selectedIds = elements.filter(e => e.type === 'text').map(e => String(e.id))
+        } else {
+          selectedIds = Array.isArray(answer) ? answer.map(String) : [String(answer)]
+        }
+        
+        const sortedElements = [...elements].sort((a, b) => (a.priority || 0) - (b.priority || 0))
         
         for (const el of sortedElements) {
           if (selectedIds.includes(String(el.id))) {
             const type = Number(el.evaluatingType || 0)
             const val = Number(el.evaluatingValue || 0)
             
-            if (type === 1) catScore += val
-            else if (type === 2) catScore -= val
-            else if (type === 3) catScore *= val
+            if (type === 1) points += val
+            else if (type === 2) points -= val
+            else if (type === 3) multipliers.push(val)
             else if (type === 5) catCeilings.push(val)
           }
         }
+      }
+      
+      let catScore = points
+      for (const coef of multipliers) {
+        catScore *= coef
       }
       
       if (cat.currentNote && Number(cat.currentNote) > 0) {
@@ -667,10 +705,16 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         catScore = Math.min(catScore, Math.min(...catCeilings))
       }
       
-      total += catScore
+      const catCoef = cat.coefficient !== undefined ? Number(cat.coefficient) : 1;
+      const finalCatScore = catScore * catCoef;
+      
+      categoriesScores[cat.id] = finalCatScore
+      total += finalCatScore
     }
-    return total
+    return { total, categories: categoriesScores }
   }, [collectedAnswers, questionnaire])
+
+  const studentScore = scoreDetails.total;
 
   function evaluationLabel(element) {
     const type = Number(element?.evaluatingType || 0)
@@ -678,7 +722,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
     if (type === 1) return `+${value} pt`
     if (type === 2) return `-${value} pt`
     if (type === 3) return `coef. ${value}`
-    if (type === 5) return 'plafond catégorie'
+    if (type === 5) return `plafond ${value} pt`
     return 'non noté'
   }
 
@@ -713,7 +757,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       gap: 2
     }}>
       <Typography sx={{ fontSize: 12, fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1 }}>
-        Étudiants de la session
+        Étudiants
       </Typography>
       
       <Box sx={{ 
@@ -725,47 +769,78 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
         '&::-webkit-scrollbar': { width: '4px' },
         '&::-webkit-scrollbar-thumb': { background: 'rgba(0,0,0,0.05)', borderRadius: '10px' }
       }}>
-        {visibleStudents.length > 0 ? visibleStudents.map((s) => (
+        {previewMode === 'teacher' && (
           <Button
-            key={s.studentId}
-            onClick={() => setSelectedStudentId(s.studentId)}
+            onClick={() => setSelectedStudentId(null)}
             sx={{
               justifyContent: 'flex-start',
               textTransform: 'none',
               borderRadius: '100px',
               py: 1.5,
               px: 2,
+              mb: 1,
               textAlign: 'left',
-              bgcolor: selectedStudentId === s.studentId ? 'rgba(97, 103, 189, 0.12)' : 'transparent',
-              color: selectedStudentId === s.studentId ? 'primary.main' : 'text.primary',
+              bgcolor: !selectedStudentId ? 'rgba(97, 103, 189, 0.12)' : 'transparent',
+              color: !selectedStudentId ? 'primary.main' : 'text.primary',
               '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
-              position: 'relative'
+              fontWeight: !selectedStudentId ? 700 : 500,
             }}
+            startIcon={<SchoolIcon sx={{ opacity: 0.7 }} />}
           >
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
-              <Avatar sx={{ 
-                width: 32, 
-                height: 32, 
-                fontSize: 14, 
-                bgcolor: selectedStudentId === s.studentId ? 'primary.main' : 'rgba(0,0,0,0.08)',
-                color: selectedStudentId === s.studentId ? 'white' : 'text.secondary'
-              }}>
-                {(s.studentNom?.[0] || '') + (s.studentPrenom?.[0] || '')}
-              </Avatar>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography noWrap sx={{ fontSize: 14, fontWeight: selectedStudentId === s.studentId ? 700 : 500 }}>
-                  {s.studentNom} {s.studentPrenom}
-                </Typography>
-                <Typography noWrap sx={{ fontSize: 11, opacity: 0.7 }}>
-                  {s.juryName}
-                </Typography>
-              </Box>
-                    {evaluatedStudentIds.has(s.studentId) && (
-                      <CheckCircleIcon sx={{ ml: 'auto', fontSize: 18, color: 'success.main', opacity: 0.8 }} />
-                    )}
-            </Box>
+            Mode Test (Bac à sable)
           </Button>
-        )) : (
+        )}
+        {visibleStudents.length > 0 ? (
+          (() => {
+            const grouped = visibleStudents.reduce((acc, s) => {
+              const jury = s.juryName || 'Sans Jury';
+              if (!acc[jury]) acc[jury] = [];
+              acc[jury].push(s);
+              return acc;
+            }, {});
+
+            const sortedJuries = Object.keys(grouped).sort();
+
+            return sortedJuries.map((juryName) => (
+              <Box key={juryName} sx={{ mb: 1.5 }}>
+                <Typography sx={{ fontSize: 11, fontWeight: 700, color: 'text.secondary', textTransform: 'uppercase', ml: 1, mb: 0.5 }}>
+                  Jury {juryName}
+                </Typography>
+                {grouped[juryName].sort((a, b) => (a.studentNom || '').localeCompare(b.studentNom || '')).map((s) => (
+                  <Button
+                    key={s.studentId}
+                    onClick={() => setSelectedStudentId(s.studentId)}
+                    sx={{
+                      width: '100%',
+                      justifyContent: 'flex-start',
+                      textTransform: 'none',
+                      borderRadius: '100px',
+                      py: 1.5,
+                      px: 2,
+                      mb: 0.5,
+                      textAlign: 'left',
+                      bgcolor: selectedStudentId === s.studentId ? 'rgba(97, 103, 189, 0.12)' : 'transparent',
+                      color: selectedStudentId === s.studentId ? 'primary.main' : 'text.primary',
+                      '&:hover': { bgcolor: 'rgba(0,0,0,0.04)' },
+                      position: 'relative'
+                    }}
+                  >
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0, width: '100%' }}>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography noWrap sx={{ fontSize: 14, fontWeight: selectedStudentId === s.studentId ? 700 : 500 }}>
+                          {s.studentNom} {s.studentPrenom}
+                        </Typography>
+                      </Box>
+                      {evaluatedStudentIds.has(s.studentId) && (
+                        <CheckCircleIcon sx={{ ml: 'auto', fontSize: 18, color: 'success.main', opacity: 0.8 }} />
+                      )}
+                    </Box>
+                  </Button>
+                ))}
+              </Box>
+            ));
+          })()
+        ) : (
           <Typography sx={{ fontSize: 13, color: 'text.secondary', textAlign: 'center', mt: 4, fontStyle: 'italic' }}>
             Aucun étudiant à évaluer dans cette session.
           </Typography>
@@ -810,7 +885,55 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                     borderRight: canEdit ? '1px solid rgba(0,0,0,0.1)' : 'none' 
                   }}>
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
-                    <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore} / ${questionnaire?.maxScore ?? 20}`}</Typography>
+                    {!canEdit ? (
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <InputBase
+                          type="number"
+                          value={overrideScore !== '' ? overrideScore : (studentScore !== null ? String(studentScore) : '')}
+                          onChange={(e) => setOverrideScore(e.target.value)}
+                          inputProps={{ 
+                            min: 0, 
+                            max: questionnaire?.maxScore ?? 20, 
+                            step: "any",
+                          }}
+                          sx={{
+                            bgcolor: 'rgba(97, 103, 189, 0.08)',
+                            px: 1,
+                            py: 0.25,
+                            borderRadius: 1.5,
+                            border: '1px solid rgba(97, 103, 189, 0.25)',
+                            '& input': {
+                              width: '36px',
+                              textAlign: 'center',
+                              fontWeight: 800,
+                              fontSize: '16px',
+                              padding: 0,
+                              MozAppearance: 'textfield',
+                              '&::-webkit-outer-spin-button, &::-webkit-inner-spin-button': {
+                                WebkitAppearance: 'none',
+                                margin: 0,
+                              },
+                            }
+                          }}
+                        />
+                        <Typography sx={{ fontSize: 16, fontWeight: 800, color: 'text.secondary' }}>
+                          {` / ${questionnaire?.maxScore ?? 20}`}
+                        </Typography>
+                        {overrideScore !== '' && (
+                          <Tooltip title="Réinitialiser à la note calculée">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => setOverrideScore('')}
+                              sx={{ p: 0.2, ml: 0.5 }}
+                            >
+                              <UndoIcon sx={{ fontSize: 14 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
+                    ) : (
+                      <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore} / ${questionnaire?.maxScore ?? 20}`}</Typography>
+                    )}
                   </Box>
                 )}
             {!canEdit && selectedStudentId && (
@@ -1020,7 +1143,18 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   sx={{ minHeight: 210, height: '100%', '& .MuiCard-root': { height: '100%', outline: (dragOverTarget === i && draggedQuestionId) ? '2px dashed #6167bd' : 'none' } }}
                 >
                   {p ? (
-                    <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={!canEdit} onAnswerChange={handleAnswerChange} externalAnswer={collectedAnswers && (collectedAnswers[p.question.id] || collectedAnswers[`ans_q${p.question.id}`])} />
+                    <QuestionComponent 
+                      data={p.question} 
+                      category={p.category} 
+                      questionnaireId={effectiveQuestionnaireId} 
+                      index={i + 1} 
+                      onRefresh={load} 
+                      readOnly={!canEdit} 
+                      onAnswerChange={handleAnswerChange} 
+                      externalAnswer={collectedAnswers && (collectedAnswers[p.question.id] || collectedAnswers[`ans_q${p.question.id}`])} 
+                      comment={(collectedAnswers && (collectedAnswers[`comment_q${p.question.id}`] || collectedAnswers[`comment_${p.question.id}`])) || ''}
+                      onCommentChange={(comment) => handleAnswerChange(`comment_q${p.question.id}`, comment)}
+                    />
                   ) : (canAddQuestion && i === addSlotIndex) ? (
                     <Box
                       onClick={() => addQuestionToCategory(selectedCategoryId)}
@@ -1248,13 +1382,6 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
               <>
                 <Divider sx={{ my: 1 }} />
                 {(() => {
-                  const otherCeilingsSum = (questionnaire?.categories || [])
-                    .filter(c => c.id !== selectedCategoryId)
-                    .reduce((sum, cat) => sum + Number(cat.currentNote || 0), 0);
-                  const maxScoreValue = Number(questionnaire?.maxScore || 20);
-                  const maxAllowed = Math.max(0, maxScoreValue - otherCeilingsSum);
-                  const currentVal = Number(selectedCategory.currentNote || 0);
-
                   return (
                     <>
                       <Typography sx={{ px: 2, mb: 1.5, fontSize: 10, fontWeight: 800, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 1.2 }}>
@@ -1267,8 +1394,7 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                           size="small"
                           value={selectedCategory.currentNote ?? 0}
                           onChange={(e) => {
-                            const raw = e.target.value === '' ? 0 : parseFloat(e.target.value);
-                            const val = Math.min(raw, maxAllowed);
+                            const val = e.target.value === '' ? '' : parseFloat(e.target.value);
                             setQuestionnaire(prev => {
                               if (!prev) return prev;
                               return {
@@ -1280,20 +1406,38 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                             });
                           }}
                           onBlur={(e) => {
-                            const raw = parseFloat(e.target.value) || 0;
-                            const val = Math.min(raw, maxAllowed);
+                            const val = parseFloat(e.target.value) || 0;
                             updateCategoryApi(selectedCategoryId, { currentNote: val });
                           }}
-                          inputProps={{ step: "any", min: 0, max: maxAllowed }}
+                          inputProps={{ step: "any", min: 0 }}
                           fullWidth
-                          helperText={
-                            maxAllowed === 0 
-                            ? "Budget épuisé par les autres catégories."
-                            : currentVal >= maxAllowed && maxScoreValue > 0 && questionnaire?.categories?.length > 1
-                              ? `Limite de budget atteinte (${maxAllowed} pts restants)`
-                              : `Budget max pour cette catégorie : ${maxAllowed}`
-                          }
-                          error={maxAllowed === 0}
+                          helperText="Cette valeur définit la note maximale (et de départ) de la catégorie."
+                          sx={{ '& .MuiOutlinedInput-root': { borderRadius: '16px' }, mb: 2 }}
+                        />
+                        <TextField
+                          label="Coefficient de la catégorie"
+                          type="number"
+                          size="small"
+                          value={selectedCategory.coefficient ?? 1}
+                          onChange={(e) => {
+                            const val = e.target.value === '' ? '' : parseFloat(e.target.value);
+                            setQuestionnaire(prev => {
+                              if (!prev) return prev;
+                              return {
+                                ...prev,
+                                categories: prev.categories.map(c => 
+                                  c.id === selectedCategoryId ? { ...c, coefficient: val } : c
+                                )
+                              };
+                            });
+                          }}
+                          onBlur={(e) => {
+                            const val = parseFloat(e.target.value) || 1;
+                            updateCategoryApi(selectedCategoryId, { coefficient: val });
+                          }}
+                          inputProps={{ step: "any", min: 0 }}
+                          fullWidth
+                          helperText="Multiplicateur appliqué au score de cette catégorie."
                           sx={{ '& .MuiOutlinedInput-root': { borderRadius: '16px' } }}
                         />
                       </Box>
@@ -1337,7 +1481,10 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
       <Dialog
         fullScreen
         open={!!previewMode}
-        onClose={() => setPreviewMode(null)}
+        onClose={() => {
+          setPreviewMode(null);
+          setSelectedStudentId(null);
+        }}
         TransitionComponent={Transition}
         PaperProps={{ sx: { bgcolor: 'background.default', borderRadius: 7 } }}
       >
@@ -1368,16 +1515,86 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                   >
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
                       <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Note</Typography>
-                      <Typography sx={{ fontSize: 16, fontWeight: 800 }}>{`${studentScore ?? '—'} / ${questionnaire?.maxScore ?? 20}`}</Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                        <InputBase
+                          type="number"
+                          value={overrideScore !== '' ? overrideScore : (studentScore !== null ? String(studentScore) : '')}
+                          onChange={(e) => setOverrideScore(e.target.value)}
+                          inputProps={{ 
+                            min: 0, 
+                            max: questionnaire?.maxScore ?? 20, 
+                            step: "any",
+                          }}
+                          sx={{
+                            bgcolor: 'rgba(97, 103, 189, 0.08)',
+                            px: 1,
+                            py: 0.25,
+                            borderRadius: 1.5,
+                            border: '1px solid rgba(97, 103, 189, 0.25)',
+                            '& input': {
+                              width: '36px',
+                              textAlign: 'center',
+                              fontWeight: 800,
+                              fontSize: '16px',
+                              padding: 0,
+                              MozAppearance: 'textfield',
+                              '&::-webkit-outer-spin-button, &::-webkit-inner-spin-button': {
+                                WebkitAppearance: 'none',
+                                margin: 0,
+                              },
+                            }
+                          }}
+                        />
+                        <Typography sx={{ fontSize: 16, fontWeight: 800, color: 'text.secondary' }}>
+                          {` / ${questionnaire?.maxScore ?? 20}`}
+                        </Typography>
+                        {overrideScore !== '' && (
+                          <Tooltip title="Réinitialiser à la note calculée">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => setOverrideScore('')}
+                              sx={{ p: 0.2, ml: 0.5 }}
+                            >
+                              <UndoIcon sx={{ fontSize: 14 }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                     </Box>
                     {selectedStudentId && (
                       <Tooltip title="Enregistrer la note">
                         <IconButton onClick={saveSubmission} color="primary" sx={{ width: 36, height: 36 }}><SaveIcon fontSize="small" /></IconButton>
                       </Tooltip>
                     )}
+                    {!selectedStudentId && (
+                      <Tooltip title="Réinitialiser les réponses du test">
+                        <IconButton 
+                          onClick={() => {
+                            setCollectedAnswers({});
+                            try {
+                              localStorage.removeItem(`answers_${effectiveQuestionnaireId}`);
+                            } catch (e) {}
+                          }} 
+                          color="error" 
+                          sx={{ width: 36, height: 36, ml: 0.5 }}
+                        >
+                          <DeleteIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
                   </Paper>
                 ) : null}
-              rightActions={<IconButton size="small" onClick={() => setPreviewMode(null)}><CloseIcon fontSize="small" /></IconButton>}
+              rightActions={
+                <IconButton 
+                  size="small" 
+                  onClick={() => {
+                    setPreviewMode(null);
+                    setSelectedStudentId(null);
+                  }}
+                >
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              }
               hideDashboardLink={true}
             />
           </Box>
@@ -1461,7 +1678,18 @@ export default function QuestionManagerEditor({ questionnaireId, readOnly = fals
                 {slots.map((p, i) => (
                   <Box key={p ? p.question.id : `slot-${i}`} sx={{ minHeight: 210, height: '100%' }}>
                     {p ? (
-                      <QuestionComponent data={p.question} category={p.category} questionnaireId={effectiveQuestionnaireId} index={i + 1} onRefresh={load} readOnly={true} onAnswerChange={handleAnswerChange} /> // QuestionComponent handles its own style
+                      <QuestionComponent 
+                        data={p.question} 
+                        category={p.category} 
+                        questionnaireId={effectiveQuestionnaireId} 
+                        index={i + 1} 
+                        onRefresh={load} 
+                        readOnly={true} 
+                        onAnswerChange={handleAnswerChange} 
+                        externalAnswer={collectedAnswers && (collectedAnswers[p.question.id] || collectedAnswers[`ans_q${p.question.id}`])} 
+                        comment={(collectedAnswers && (collectedAnswers[`comment_q${p.question.id}`] || collectedAnswers[`comment_${p.question.id}`])) || ''}
+                        onCommentChange={(comment) => handleAnswerChange(`comment_q${p.question.id}`, comment)}
+                      />
                     ) : (
                       <Box sx={{ border: '1px dashed rgba(0,0,0,0.06)', borderRadius: 2, height: '100%', minHeight: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'text.secondary', bgcolor: 'transparent' }} />
                     )}

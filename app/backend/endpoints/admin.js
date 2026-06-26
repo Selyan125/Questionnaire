@@ -2,7 +2,6 @@ import express from 'express';
 import { prisma, requireAdmin, generatePassword, hashPassword, normalizeEmail } from '../utils.js';
 
 const router = express.Router();
-
 // Route for importing students/teachers via CSV
 router.post('/import', requireAdmin, async (req, res) => {
   const { targetRole, users, isTest } = req.body;

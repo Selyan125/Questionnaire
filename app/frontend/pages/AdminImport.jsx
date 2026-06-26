@@ -149,6 +149,7 @@ export default function AdminImport() {
     setError(null)
     setResults(null)
     
+    let parsedCsv = [];
     if (targetRole === 'full_json') {
       if (!jsonFile) {
         setError('Veuillez sélectionner un fichier JSON.');
@@ -157,9 +158,28 @@ export default function AdminImport() {
     } else if (!csv) { // CSV import, check if csv content is present
         setError('Veuillez entrer des données CSV ou déposer un fichier.');
         return;
-    } else if (parseCsv(csv).length === 0) {
-      setError('Aucune ligne valide trouvée dans le CSV.');
-      return;
+    } else {
+      parsedCsv = parseCsv(csv);
+      if (parsedCsv.length === 0) {
+        setError('Aucune ligne valide trouvée dans le CSV.');
+        return;
+      }
+      
+      // Validation du fichier CSV
+      for (let i = 0; i < parsedCsv.length; i++) {
+        const row = parsedCsv[i];
+        if (targetRole === 'teacher_csv') {
+          if (!row.nom || !row.prenom) {
+             setError(`Fichier incorrect : Ligne ${i + 1} invalide. Nom et prénom sont obligatoires pour un enseignant.`);
+             return;
+          }
+        } else if (targetRole === 'student_csv') {
+          if (!row.nom || !row.prenom || !row.year) {
+             setError(`Fichier incorrect : Ligne ${i + 1} invalide. Nom, prénom et année sont obligatoires pour un étudiant.`);
+             return;
+          }
+        }
+      }
     }
 
     setLoading(true)
@@ -183,7 +203,7 @@ export default function AdminImport() {
         setResults([{ status: 'success', reason: 'Questions importées avec succès.' }])
         if (data.questionnaireId) navigate(`/admin/question-manager/${data.questionnaireId}`)
       } else { // CSV import for students or teachers
-        data = await importUsers({ targetRole: targetRole.replace('_csv', ''), users: parseCsv(csv) });
+        data = await importUsers({ targetRole: targetRole.replace('_csv', ''), users: parsedCsv });
         setResults(data && data.results ? data.results : null);
       }
     } catch (err) {
